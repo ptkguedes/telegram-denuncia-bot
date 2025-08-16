@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Lista de IDs dos administradores
-ADMINS = [7477496964, 643952867]
+ADMINS = [7477496964, 6439529867]
 
 # Arquivo para salvar denúncias
 DENUNCIAS_ARQUIVO = "denuncias.json"
