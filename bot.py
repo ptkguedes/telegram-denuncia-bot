@@ -9,10 +9,8 @@ from telegram.ext import (
 )
 from moderacao import verificar_mensagem
 
-# 👮 IDs dos administradores
 ADMINS = [7477496964, 6439529867]
 
-# 📁 Arquivos de dados
 DENUNCIAS_ARQUIVO = "denuncias.json"
 BLOQUEADOS_ARQUIVO = "bloqueados.json"
 denuncias = []
@@ -20,7 +18,6 @@ bloqueados = []
 denuncias_em_andamento = {}  # user_id: {"categoria": ..., "mensagens": [...]}
 tempo_inatividade = {}       # user_id: datetime
 
-# 🔄 Carregamento de dados
 def carregar_denuncias():
     global denuncias
     if os.path.exists(DENUNCIAS_ARQUIVO):
@@ -44,7 +41,6 @@ def salvar_bloqueados():
 carregar_denuncias()
 carregar_bloqueados()
 
-# 📊 Categorias disponíveis
 CATEGORIAS = {
     "cat_pornografia": "Pornografia / CP",
     "cat_venda": "Venda não autorizada",
@@ -54,7 +50,6 @@ CATEGORIAS = {
     "cat_outro": "Outro"
 }
 
-# ⏳ Monitoramento de inatividade
 async def monitorar_inatividade(user_id, context):
     await asyncio.sleep(180)
     ultimo = tempo_inatividade.get(user_id)
@@ -75,7 +70,6 @@ async def monitorar_inatividade(user_id, context):
                 text="🚫 Denúncia encerrada automaticamente por inatividade. Se desejar, você pode iniciar novamente com /abrirdenuncia."
             )
 
-# 🎯 Comando /abrirdenuncia
 async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
@@ -87,7 +81,6 @@ async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     markup = InlineKeyboardMarkup(categorias)
     await update.message.reply_text("Escolha a categoria da denúncia:", reply_markup=markup)
 
-# 📥 Receber mensagens durante denúncia
 async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
@@ -105,7 +98,6 @@ async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tempo_inatividade[user_id] = datetime.datetime.now()
     await update.message.reply_text("📌 Mensagem registrada. Quando terminar, digite /enviar_denuncia.")
 
-# 📤 Comando /enviar_denuncia
 async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
@@ -144,7 +136,6 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for admin_id in ADMINS:
         await context.bot.send_message(chat_id=admin_id, text=mensagem_admin, reply_markup=keyboard)
 
-# ❌ Comando /cancelardenuncia
 async def cancelar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
@@ -159,7 +150,6 @@ async def cancelar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("⚠️ Você não possui nenhuma denúncia em andamento.")
 
-# 📊 Comando /estatisticas
 async def estatisticas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
@@ -176,7 +166,6 @@ async def estatisticas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         texto += f"• {nome}: {qtd}\n"
     await update.message.reply_text(texto)
 
-# 🔘 Handler de botões
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -197,4 +186,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Obrigado.\nAtt: Amizades"
         )
     elif query.data.startswith("bloquear_") and user_id in ADMINS:
-        alvo_id =
+        alvo_id = int(query.data.split("_")[1])
+        if alvo_id not in bloqueados:
+            bloqueados.append(alvo_id)
+            salvar_bloqueados()
+            await query.message.reply_text(f"✅ Usuário {alvo_id} bloqueado com sucesso.")
+        else:
+            await query.message.reply_text(f"⚠️ O usuário {alvo_id} já está bloqueado.")
+        await query.edit_message_reply_markup(None)
+
+TOKEN = os.getenv("BOT_TOKEN")
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("abrirden
