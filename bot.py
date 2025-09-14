@@ -9,7 +9,7 @@ from telegram.ext import (
 from moderacao import verificar_mensagem
 
 # 👮 IDs dos administradores
-ADMINS = [7477496964, 643952867]
+ADMINS = [7477496964, 6439529867]
 
 # 📁 Arquivos de dados
 DENUNCIAS_ARQUIVO = "denuncias.json"
