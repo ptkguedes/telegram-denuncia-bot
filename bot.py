@@ -1,37 +1,31 @@
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+import os
 import datetime
 import json
-import os
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from moderacao import verificar_mensagem  # 🔗 Integração com moderação
 
-# Lista de IDs dos administradores
-ADMINS = [7477496964, 6439529867]
+# 👮 Lista de IDs dos administradores
+ADMINS = [7477496964, 643952867]  # Inclui você, Patrick
 
-# Arquivo para salvar denúncias
+# 📁 Arquivo para salvar denúncias
 DENUNCIAS_ARQUIVO = "denuncias.json"
-
-# Lista em memória
 denuncias = []
 
-# Carrega denúncias salvas
 def carregar_denuncias():
     global denuncias
     if os.path.exists(DENUNCIAS_ARQUIVO):
         with open(DENUNCIAS_ARQUIVO, "r", encoding="utf-8") as f:
             denuncias = json.load(f)
 
-# Salva denúncias no arquivo
 def salvar_denuncias():
     with open(DENUNCIAS_ARQUIVO, "w", encoding="utf-8") as f:
         json.dump(denuncias, f, ensure_ascii=False, indent=4)
 
 carregar_denuncias()
 
-# Comando /start — só responde em chat privado
+# 🎯 Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat.type != "private":
-        return  # Ignora se não for chat privado
-
     await update.message.reply_text(
         "Bem-vindo ao Canal de Denúncias\n\n"
         "Este espaço é confidencial e destinado a receber denúncias sobre comportamentos, conteúdos ou situações que violem as regras do grupo.\n\n"
@@ -42,20 +36,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✍️ Para começar, descreva abaixo a sua denúncia com o máximo de detalhes possíveis (incluindo prints, se necessário)."
     )
 
-# Recebe denúncias — só responde em chat privado
+# 📥 Receber denúncias
 async def receber_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat.type != "private":
-        return  # Ignora se não for chat privado
-
     user = update.message.from_user
     user_id = user.id
     username = user.username or "Não disponível"
     timestamp = datetime.datetime.now().isoformat()
 
+    # 🧠 Verificação de moderação
     if update.message.text:
+        texto = update.message.text.strip()
+        erro = verificar_mensagem(user_id, texto)
+        if erro:
+            await update.message.reply_text(erro)
+            return
+
         denuncia = {
             "tipo": "texto",
-            "conteudo": update.message.text,
+            "conteudo": texto,
             "timestamp": timestamp,
             "user_id": user_id,
             "username": username
@@ -64,8 +62,9 @@ async def receber_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📥 Nova denúncia recebida\n"
             f"📅 {timestamp}\n"
             f"👤 Denunciante: @{username} (ID: {user_id})\n"
-            f"📝 Conteúdo:\n{update.message.text}"
+            f"📝 Conteúdo:\n{texto}"
         )
+
     elif update.message.photo:
         file_id = update.message.photo[-1].file_id
         denuncia = {
@@ -95,11 +94,8 @@ async def receber_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif denuncia["tipo"] == "imagem":
             await context.bot.send_photo(chat_id=admin_id, photo=file_id, caption=mensagem_admin)
 
-# Comando /ver — só para administradores
+# 🔍 Ver denúncias (somente admins)
 async def ver_denuncias(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat.type != "private":
-        return  # Ignora se não for chat privado
-
     if update.message.from_user.id in ADMINS:
         if not denuncias:
             await update.message.reply_text("Nenhuma denúncia registrada até o momento.")
@@ -122,11 +118,10 @@ async def ver_denuncias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("🚫 Você não tem permissão para visualizar denúncias.")
 
-# Inicializa o bot
-app = ApplicationBuilder().token("8278374842:AAG1CuSDCC4bBSlCp5FvDlXlfpMr26lL5uk").build()
-
+# 🚀 Inicialização do bot
+TOKEN = os.getenv("BOT_TOKEN")
+app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("ver", ver_denuncias))
 app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, receber_denuncia))
-
 app.run_polling()
