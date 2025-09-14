@@ -44,9 +44,7 @@ carregar_bloqueados()
 # 🎯 Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
-        await update.message.reply_text("🚫 Use este comando em chat privado com o bot.")
         return
-
     await update.message.reply_text(
         "Bem-vindo ao Canal de Denúncias\n\n"
         "Este espaço é confidencial e destinado a receber denúncias sobre comportamentos, conteúdos ou situações que violem as regras do grupo.\n\n"
@@ -60,7 +58,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 📥 Receber denúncias
 async def receber_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
-        await update.message.reply_text("🚫 Este bot só aceita denúncias via chat privado.")
         return
 
     user = update.message.from_user
@@ -69,7 +66,6 @@ async def receber_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     timestamp = datetime.datetime.now().isoformat()
 
     if user_id in bloqueados:
-        await update.message.reply_text("🚫 Você está bloqueado e não pode enviar denúncias.")
         return
 
     if update.message.text:
@@ -108,7 +104,6 @@ async def receber_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👤 Denunciante: @{username} (ID: {user_id})"
         )
     else:
-        await update.message.reply_text("🚫 Tipo de conteúdo não suportado. Envie texto ou imagem.")
         return
 
     denuncias.append(denuncia)
@@ -135,7 +130,6 @@ async def receber_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 🔍 Ver denúncias
 async def ver_denuncias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
-        await update.message.reply_text("🚫 Use este comando em chat privado com o bot.")
         return
 
     if update.message.from_user.id in ADMINS:
@@ -164,6 +158,9 @@ async def ver_denuncias(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    if query.message.chat.type != "private":
+        return
 
     if query.from_user.id not in ADMINS:
         await query.edit_message_reply_markup(None)
@@ -197,4 +194,8 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("ver", ver_denuncias))
 app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, receber_denuncia))
 app.add_handler(CallbackQueryHandler(callback_handler))
+
+# 🚫 Ignorar qualquer interação fora de chat privado
+app.add_handler(MessageHandler(~filters.ChatType.PRIVATE, lambda update, context: None))
+
 app.run_polling()
