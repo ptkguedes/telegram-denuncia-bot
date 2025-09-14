@@ -197,4 +197,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 TOKEN = os.getenv("BOT_TOKEN")
 app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("abrirden
+app.add_handler(CommandHandler("abrirdenuncia", abrir_denuncia))
+app.add_handler(CommandHandler("enviar_denuncia", enviar_denuncia))
+app.add_handler(CommandHandler("cancelardenuncia", cancelar_denuncia))
+app.add_handler(CommandHandler("estatisticas", estatisticas))
+app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, receber_mensagem))
+app.add_handler(CallbackQueryHandler(callback_handler))
+app.add_handler(MessageHandler(~filters.ChatType.PRIVATE, lambda update, context: None))
+app.run_polling()
