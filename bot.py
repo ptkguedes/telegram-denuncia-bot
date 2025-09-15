@@ -194,14 +194,7 @@ async def estatisticas(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def interagir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id not in ADMINS:
-        await update.message.reply_text("🚫 Comando restrito aos administradores.")
-        return
-    try:
-        partes = update.message.text.split(maxsplit=2)
-        alvo_id = int(partes[1])
-        mensagem = partes[2]
-        await context.bot.send_message(chat_id=alvo_id, text=f"📣 Mensagem da moderação:\n{mensagem}")
-        await update.message.reply_text("✅ Mensagem enviada com sucesso.")
+                await update.message.reply_text("✅ Mensagem enviada com sucesso.")
     except:
         await update.message.reply_text("⚠️ Uso correto: /interagir <user_id> <mensagem>")
 
@@ -224,7 +217,7 @@ async def unblock(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"✅ Usuário {alvo_id} foi desbloqueado com sucesso.")
         else:
             await update.message.reply_text("⚠️ Esse usuário não está bloqueado.")
-    except Exception as e:
+    except Exception:
         await update.message.reply_text("⚠️ Erro ao tentar desbloquear. Verifique o ID ou a mensagem marcada.")
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -233,6 +226,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = query.from_user.id
     data = query.data
+
+    if data in CATEGORIAS:
+        denuncias_em_andamento[user_id] = {
+            "categoria": CATEGORIAS[data],
+            "mensagens": []
+        }
+        tempo_inatividade[user_id] = datetime.datetime.now()
+        await query.edit_message_text(f"✅ Categoria selecionada: {CATEGORIAS[data]}\nAgora envie as mensagens com evidências.")
+        asyncio.create_task(monitorar_inatividade(user_id, context))
+        return
 
     if data.startswith("bloquear_") and user_id in ADMINS:
         alvo_id = int(data.split("_")[1])
