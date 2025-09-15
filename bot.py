@@ -198,11 +198,8 @@ async def interagir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Mensagem enviada com sucesso.")
     except:
         await update.message.reply_text("⚠️ Uso correto: /interagir <user_id> <mensagem>")
-   import os
 from dotenv import load_dotenv
-
 load_dotenv()  # Carrega variáveis do .env localmente (ignorado no Railway)
-
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("❌ BOT_TOKEN não está definido. Configure no .env ou nas variáveis do Railway.")
