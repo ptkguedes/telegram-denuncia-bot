@@ -103,37 +103,57 @@ async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
+
     user_id = update.message.from_user.id
     if user_id not in denuncias_em_andamento:
         await update.message.reply_text("🚫 Para fazer uma denúncia, você deve começar com /abrirdenuncia.")
         return
-    texto = update.message.text.strip() if update.message.text else "[imagem]"
+
+    if update.message.photo:
+        foto = update.message.photo[-1]
+        file_id = foto.file_id
+        texto = f"[imagem] file_id: {file_id}"
+    else:
+        texto = update.message.text.strip() if update.message.text else "[imagem]"
+
     erro = verificar_mensagem(user_id, texto)
     if erro:
         await update.message.reply_text(erro)
         return
+
     timestamp = datetime.datetime.now().isoformat()
     denuncias_em_andamento[user_id]["mensagens"].append({"texto": texto, "timestamp": timestamp})
     tempo_inatividade[user_id] = datetime.datetime.now()
     await update.message.reply_text("📌 Mensagem registrada. Quando terminar, digite /enviar_denuncia.")
-
-async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
+
     user = update.message.from_user
     user_id = user.id
     username = user.username or "Não disponível"
     dados = denuncias_em_andamento.get(user_id)
+
     if not dados or not dados["mensagens"]:
         await update.message.reply_text("⚠️ Nenhuma denúncia em andamento.")
         return
+
     if denuncia_sem_evidencia(dados["mensagens"]):
         await update.message.reply_text(
             "⚠️ Sua denúncia parece estar sem evidências claras (como imagem, perfil ou @usuario).\n"
             "Isso pode dificultar nossa atuação. Se possível, envie mais detalhes antes de finalizar."
         )
         return
-    texto_completo = "\n".join([m["texto"] for m in dados["mensagens"]])
+
+    texto_completo = ""
+    imagens = []
+
+    for m in dados["mensagens"]:
+        texto_completo += f"{m['texto']}\n"
+        if m["texto"].startswith("[imagem] file_id:"):
+            file_id = m["texto"].split("file_id:")[1].strip()
+            imagens.append(file_id)
+
     timestamp = datetime.datetime.now().isoformat()
     denuncia = {
         "tipo": "texto",
@@ -143,15 +163,19 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "user_id": user_id,
         "username": username
     }
+
     denuncias.append(denuncia)
     salvar_denuncias()
     denuncias_em_andamento.pop(user_id, None)
     tempo_inatividade.pop(user_id, None)
+
     await update.message.reply_text("✅ Sua denúncia foi enviada com sucesso. Obrigado por contribuir com a segurança do grupo.")
+
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🚫 Bloquear usuário", callback_data=f"bloquear_{user_id}")],
         [InlineKeyboardButton("💬 Interagir com denunciante", callback_data=f"interagir_{user_id}")]
     ])
+
     mensagem_admin = (
         f"📥 Nova denúncia recebida\n"
         f"📅 {timestamp}\n"
@@ -159,8 +183,11 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📂 Categoria: {dados['categoria']}\n"
         f"📝 Conteúdo:\n{texto_completo}"
     )
+
     for admin_id in ADMINS:
         await context.bot.send_message(chat_id=admin_id, text=mensagem_admin, reply_markup=keyboard)
+        for file_id in imagens:
+            await context.bot.send_photo(chat_id=admin_id, photo=file_id)
 
 async def cancelar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
