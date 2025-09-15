@@ -205,6 +205,28 @@ async def interagir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await update.message.reply_text("⚠️ Uso correto: /interagir <user_id> <mensagem>")
 
+async def unblock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.from_user.id not in ADMINS:
+        await update.message.reply_text("🚫 Comando restrito aos administradores.")
+        return
+    try:
+        if context.args:
+            alvo_id = int(context.args[0])
+        elif update.message.reply_to_message:
+            alvo_id = update.message.reply_to_message.from_user.id
+        else:
+            await update.message.reply_text("⚠️ Uso: /unblock <user_id> ou responda à mensagem do usuário bloqueado.")
+            return
+
+        if alvo_id in bloqueados:
+            bloqueados.remove(alvo_id)
+            salvar_bloqueados()
+            await update.message.reply_text(f"✅ Usuário {alvo_id} foi desbloqueado com sucesso.")
+        else:
+            await update.message.reply_text("⚠️ Esse usuário não está bloqueado.")
+    except Exception as e:
+        await update.message.reply_text("⚠️ Erro ao tentar desbloquear. Verifique o ID ou a mensagem marcada.")
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -237,9 +259,9 @@ app.add_handler(CommandHandler("enviar_denuncia", enviar_denuncia))
 app.add_handler(CommandHandler("cancelardenuncia", cancelar_denuncia))
 app.add_handler(CommandHandler("estatisticas", estatisticas))
 app.add_handler(CommandHandler("interagir", interagir))
+app.add_handler(CommandHandler("unblock", unblock))
 app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, receber_mensagem))
 app.add_handler(CallbackQueryHandler(callback_handler))
 app.add_handler(MessageHandler(~filters.ChatType.PRIVATE, lambda update, context: None))
 
 app.run_polling()
-
