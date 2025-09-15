@@ -103,20 +103,28 @@ async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
+
     user_id = update.message.from_user.id
     if user_id not in denuncias_em_andamento:
         await update.message.reply_text("🚫 Para fazer uma denúncia, você deve começar com /abrirdenuncia.")
         return
-   if update.message.photo:
-        foto = update.message.photo[-1]  # pega a melhor resolução disponível
+
+    if update.message.photo:
+        foto = update.message.photo[-1]
         file_id = foto.file_id
         texto = f"[imagem] file_id: {file_id}"
     else:
         texto = update.message.text.strip() if update.message.text else "[imagem]"
+
     erro = verificar_mensagem(user_id, texto)
     if erro:
         await update.message.reply_text(erro)
         return
+
+    timestamp = datetime.datetime.now().isoformat()
+    denuncias_em_andamento[user_id]["mensagens"].append({"texto": texto, "timestamp": timestamp})
+    tempo_inatividade[user_id] = datetime.datetime.now()
+    await update.message.reply_text("📌 Mensagem registrada. Quando terminar, digite /enviar_denuncia.")
 
     timestamp = datetime.datetime.now().isoformat()
     denuncias_em_andamento[user_id]["mensagens"].append({"texto": texto, "timestamp": timestamp})
