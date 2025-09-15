@@ -199,7 +199,7 @@ async def interagir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await update.message.reply_text("⚠️ Uso correto: /interagir <user_id> <mensagem>")
         TOKEN = os.getenv("BOT_TOKEN")
-app = ApplicationBuilder().token(TOKEN).build()
+app = ApplicationBuilder().token(BOT_TOKEN).build()
 
 app.add_handler(CommandHandler("abrirdenuncia", abrir_denuncia))
 app.add_handler(CommandHandler("enviar_denuncia", enviar_denuncia))
@@ -211,3 +211,4 @@ app.add_handler(CallbackQueryHandler(callback_handler))
 app.add_handler(MessageHandler(~filters.ChatType.PRIVATE, lambda update, context: None))
 
 app.run_polling()
+
