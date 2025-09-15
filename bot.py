@@ -23,6 +23,7 @@ denuncias = []
 bloqueados = []
 denuncias_em_andamento = {}
 tempo_inatividade = {}
+conversas_ativas = {}  # chave: user_id do denunciante, valor: admin_id
 
 def carregar_denuncias():
     global denuncias
@@ -105,6 +106,21 @@ async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_id = update.message.from_user.id
+
+    # Se o usuário está em conversa ativa com um admin
+    if user_id in conversas_ativas:
+        admin_id = conversas_ativas[user_id]
+        texto = update.message.text.strip() if update.message.text else "[imagem]"
+        if update.message.photo:
+            foto = update.message.photo[-1]
+            file_id = foto.file_id
+            texto = f"[imagem] file_id: {file_id}"
+        await context.bot.send_message(
+            chat_id=admin_id,
+            text=f"📨 Resposta de @{update.message.from_user.username or user_id}:\n{texto}"
+        )
+        return
+
     if user_id not in denuncias_em_andamento:
         await update.message.reply_text("🚫 Para fazer uma denúncia, você deve começar com /abrirdenuncia.")
         return
@@ -125,7 +141,7 @@ async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     denuncias_em_andamento[user_id]["mensagens"].append({"texto": texto, "timestamp": timestamp})
     tempo_inatividade[user_id] = datetime.datetime.now()
     await update.message.reply_text("📌 Mensagem registrada. Quando terminar, digite /enviar_denuncia.")
- 
+
 async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
@@ -190,6 +206,47 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for file_id in imagens:
             await context.bot.send_photo(chat_id=admin_id, photo=file_id)
 
+async def interagir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.from_user.id not in ADMINS:
+        await update.message.reply_text("🚫 Comando restrito aos administradores.")
+        return
+    try:
+        partes = update.message.text.split(maxsplit=2)
+        alvo_id = int(partes[1])
+        mensagem = partes[2]
+        conversas_ativas[alvo_id] = update.message.from_user.id
+        await context.bot.send_message(chat_id=alvo_id, text=f"📣 Mensagem da moderação:\n{mensagem}")
+        await update.message.reply_text("✅ Mensagem enviada e canal de conversa ativado.")
+    except Exception:
+        await update.message.reply_text("⚠️ Uso correto: /interagir <user_id> <mensagem>")
+
+async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.from_user.id not in ADMINS:
+        await update.message.reply_text("🚫 Comando restrito aos administradores.")
+        return
+    try:
+        partes = update.message.text.split(maxsplit=2)
+        alvo_id = int(partes[1])
+        mensagem = partes[2]
+        await context.bot.send_message(chat_id=alvo_id, text=f"💬 Resposta da moderação:\n{mensagem}")
+        await update.message.reply_text("✅ Resposta enviada ao denunciante.")
+    except Exception:
+        await update.message.reply_text("⚠️ Uso: /responder <user_id> <mensagem>")
+
+async def encerrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.from_user.id not in ADMINS:
+        await update.message.reply_text("🚫 Comando restrito aos administradores.")
+        return
+    try:
+        alvo_id = int(context.args[0])
+        if alvo_id in conversas_ativas:
+            conversas_ativas.pop(alvo_id)
+            await update.message.reply_text("✅ Conversa encerrada com sucesso.")
+        else:
+            await update.message.reply_text("⚠️ Esse usuário não está em conversa ativa.")
+    except:
+        await update.message.reply_text("⚠️ Uso: /encerrar <user_id>")
+
 async def cancelar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
@@ -219,19 +276,6 @@ async def estatisticas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for nome, qtd in contagem.items():
         texto += f"• {nome}: {qtd}\n"
     await update.message.reply_text(texto)
-
-async def interagir(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id not in ADMINS:
-        await update.message.reply_text("🚫 Comando restrito aos administradores.")
-        return
-    try:
-        partes = update.message.text.split(maxsplit=2)
-        alvo_id = int(partes[1])
-        mensagem = partes[2]
-        await context.bot.send_message(chat_id=alvo_id, text=f"📣 Mensagem da moderação:\n{mensagem}")
-        await update.message.reply_text("✅ Mensagem enviada com sucesso.")
-    except Exception:
-        await update.message.reply_text("⚠️ Uso correto: /interagir <user_id> <mensagem>")
 
 async def unblock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id not in ADMINS:
@@ -283,11 +327,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("interagir_") and user_id in ADMINS:
         alvo_id = int(data.split("_")[1])
+        conversas_ativas[alvo_id] = user_id
         await context.bot.send_message(
             chat_id=alvo_id,
             text="📣 Um administrador entrou em contato com você sobre sua denúncia. Por favor, responda aqui se desejar continuar."
         )
-        await query.edit_message_text("✅ Mensagem enviada ao denunciante.")
+        await query.edit_message_text("✅ Mensagem enviada ao denunciante e canal de conversa ativado.")
 
 # Inicialização do bot
 app = ApplicationBuilder().token(TOKEN).build()
@@ -297,6 +342,8 @@ app.add_handler(CommandHandler("enviar_denuncia", enviar_denuncia))
 app.add_handler(CommandHandler("cancelardenuncia", cancelar_denuncia))
 app.add_handler(CommandHandler("estatisticas", estatisticas))
 app.add_handler(CommandHandler("interagir", interagir))
+app.add_handler(CommandHandler("responder", responder))
+app.add_handler(CommandHandler("encerrar", encerrar))
 app.add_handler(CommandHandler("unblock", unblock))
 app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, receber_mensagem))
 app.add_handler(CallbackQueryHandler(callback_handler))
