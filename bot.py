@@ -15,8 +15,8 @@ DENUNCIAS_ARQUIVO = "denuncias.json"
 BLOQUEADOS_ARQUIVO = "bloqueados.json"
 denuncias = []
 bloqueados = []
-denuncias_em_andamento = {}  # user_id: {"categoria": ..., "mensagens": [...]}
-tempo_inatividade = {}       # user_id: datetime
+denuncias_em_andamento = {}
+tempo_inatividade = {}
 
 def carregar_denuncias():
     global denuncias
@@ -50,6 +50,12 @@ CATEGORIAS = {
     "cat_outro": "Outro"
 }
 
+def denuncia_sem_evidencia(mensagens):
+    texto = "\n".join([m["texto"].lower() for m in mensagens])
+    if "@" not in texto and "t.me/" not in texto and "[imagem]" not in texto:
+        return True
+    return False
+
 async def monitorar_inatividade(user_id, context):
     await asyncio.sleep(180)
     ultimo = tempo_inatividade.get(user_id)
@@ -73,13 +79,20 @@ async def monitorar_inatividade(user_id, context):
 async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
-    user_id = update.message.from_user.id
+    user = update.message.from_user
+    user_id = user.id
+    username = user.username or "Não disponível"
     if user_id in bloqueados:
         await update.message.reply_text("🚫 Você está bloqueado e não pode enviar denúncias.")
         return
     categorias = [[InlineKeyboardButton(nome, callback_data=key)] for key, nome in CATEGORIAS.items()]
     markup = InlineKeyboardMarkup(categorias)
     await update.message.reply_text("Escolha a categoria da denúncia:", reply_markup=markup)
+    for admin_id in ADMINS:
+        await context.bot.send_message(
+            chat_id=admin_id,
+            text=f"👤 Novo usuário iniciou uma denúncia:\nID: {user_id}\nUsername: @{username}"
+        )
 
 async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
@@ -108,6 +121,12 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not dados or not dados["mensagens"]:
         await update.message.reply_text("⚠️ Nenhuma denúncia em andamento.")
         return
+    if denuncia_sem_evidencia(dados["mensagens"]):
+        await update.message.reply_text(
+            "⚠️ Sua denúncia parece estar sem evidências claras (como imagem, perfil ou @usuario).\n"
+            "Isso pode dificultar nossa atuação. Se possível, envie mais detalhes antes de finalizar."
+        )
+        return
     texto_completo = "\n".join([m["texto"] for m in dados["mensagens"]])
     timestamp = datetime.datetime.now().isoformat()
     denuncia = {
@@ -123,6 +142,10 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     denuncias_em_andamento.pop(user_id, None)
     tempo_inatividade.pop(user_id, None)
     await update.message.reply_text("✅ Sua denúncia foi enviada com sucesso. Obrigado por contribuir com a segurança do grupo.")
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚫 Bloquear usuário", callback_data=f"bloquear_{user_id}")],
+        [InlineKeyboardButton("💬 Interagir com denunciante", callback_data=f"interagir_{user_id}")]
+    ])
     mensagem_admin = (
         f"📥 Nova denúncia recebida\n"
         f"📅 {timestamp}\n"
@@ -130,9 +153,6 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📂 Categoria: {dados['categoria']}\n"
         f"📝 Conteúdo:\n{texto_completo}"
     )
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚫 Bloquear usuário", callback_data=f"bloquear_{user_id}")]
-    ])
     for admin_id in ADMINS:
         await context.bot.send_message(chat_id=admin_id, text=mensagem_admin, reply_markup=keyboard)
 
@@ -166,42 +186,28 @@ async def estatisticas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         texto += f"• {nome}: {qtd}\n"
     await update.message.reply_text(texto)
 
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.message.chat.type != "private":
+async def interagir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.from_user.id not in ADMINS:
+        await update.message.reply_text("🚫 Comando restrito aos administradores.")
         return
-    user_id = query.from_user.id
-    if query.data.startswith("cat_"):
-        categoria = CATEGORIAS.get(query.data, "Outro")
-        denuncias_em_andamento[user_id] = {"categoria": categoria, "mensagens": []}
-        tempo_inatividade[user_id] = datetime.datetime.now()
-        context.application.create_task(monitorar_inatividade(user_id, context))
-        await query.message.reply_text(
-            f"✅ Categoria selecionada: {categoria}\nAgora descreva os detalhes da denúncia."
-        )
-        await query.message.reply_text(
-            "📌 Por Favor, lembre-se de adicionar evidências referentes à denúncia que está sendo feita.\n"
-            "Mantenha uma boa política no uso deste canal, evitando spam e perda de credibilidade em suas denúncias.\n\n"
-            "Obrigado.\nAtt: Amizades"
-        )
-    elif query.data.startswith("bloquear_") and user_id in ADMINS:
-        alvo_id = int(query.data.split("_")[1])
-        if alvo_id not in bloqueados:
-            bloqueados.append(alvo_id)
-            salvar_bloqueados()
-            await query.message.reply_text(f"✅ Usuário {alvo_id} bloqueado com sucesso.")
-        else:
-            await query.message.reply_text(f"⚠️ O usuário {alvo_id} já está bloqueado.")
-        await query.edit_message_reply_markup(None)
-
-TOKEN = os.getenv("BOT_TOKEN")
+    try:
+        partes = update.message.text.split(maxsplit=2)
+        alvo_id = int(partes[1])
+        mensagem = partes[2]
+        await context.bot.send_message(chat_id=alvo_id, text=f"📣 Mensagem da moderação:\n{mensagem}")
+        await update.message.reply_text("✅ Mensagem enviada com sucesso.")
+    except:
+        await update.message.reply_text("⚠️ Uso correto: /interagir <user_id> <mensagem>")
+        TOKEN = os.getenv("BOT_TOKEN")
 app = ApplicationBuilder().token(TOKEN).build()
+
 app.add_handler(CommandHandler("abrirdenuncia", abrir_denuncia))
 app.add_handler(CommandHandler("enviar_denuncia", enviar_denuncia))
 app.add_handler(CommandHandler("cancelardenuncia", cancelar_denuncia))
 app.add_handler(CommandHandler("estatisticas", estatisticas))
+app.add_handler(CommandHandler("interagir", interagir))
 app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, receber_mensagem))
 app.add_handler(CallbackQueryHandler(callback_handler))
 app.add_handler(MessageHandler(~filters.ChatType.PRIVATE, lambda update, context: None))
+
 app.run_polling()
