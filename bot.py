@@ -125,11 +125,6 @@ async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     denuncias_em_andamento[user_id]["mensagens"].append({"texto": texto, "timestamp": timestamp})
     tempo_inatividade[user_id] = datetime.datetime.now()
     await update.message.reply_text("📌 Mensagem registrada. Quando terminar, digite /enviar_denuncia.")
-
-    timestamp = datetime.datetime.now().isoformat()
-    denuncias_em_andamento[user_id]["mensagens"].append({"texto": texto, "timestamp": timestamp})
-    tempo_inatividade[user_id] = datetime.datetime.now()
-    await update.message.reply_text("📌 Mensagem registrada. Quando terminar, digite /enviar_denuncia.")
  
 async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
