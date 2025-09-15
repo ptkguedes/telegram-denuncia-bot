@@ -110,7 +110,7 @@ async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if update.message.photo:
-        foto = update.message.photo[-1]
+        foto = update.message.photo[-1]  # pega a melhor resolução disponível
         file_id = foto.file_id
         texto = f"[imagem] file_id: {file_id}"
     else:
