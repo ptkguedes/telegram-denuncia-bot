@@ -2,12 +2,18 @@ import os
 import datetime
 import json
 import asyncio
+from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes
 )
 from moderacao import verificar_mensagem
+
+load_dotenv()
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("❌ BOT_TOKEN não está definido. Configure no .env ou nas variáveis do Railway.")
 
 ADMINS = [7477496964, 6439529867]
 
@@ -191,19 +197,39 @@ async def interagir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 Comando restrito aos administradores.")
         return
     try:
-        partes = update.message.text.split(maxsplit=2)
+                partes = update.message.text.split(maxsplit=2)
         alvo_id = int(partes[1])
         mensagem = partes[2]
         await context.bot.send_message(chat_id=alvo_id, text=f"📣 Mensagem da moderação:\n{mensagem}")
         await update.message.reply_text("✅ Mensagem enviada com sucesso.")
     except:
         await update.message.reply_text("⚠️ Uso correto: /interagir <user_id> <mensagem>")
-from dotenv import load_dotenv
-load_dotenv()  # Carrega variáveis do .env localmente (ignorado no Railway)
-TOKEN = os.getenv("BOT_TOKEN")
-if not TOKEN:
-    raise ValueError("❌ BOT_TOKEN não está definido. Configure no .env ou nas variáveis do Railway.")
 
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    data = query.data
+
+    if data.startswith("bloquear_") and user_id in ADMINS:
+        alvo_id = int(data.split("_")[1])
+        if alvo_id not in bloqueados:
+            bloqueados.append(alvo_id)
+            salvar_bloqueados()
+            await query.edit_message_text("🚫 Usuário bloqueado com sucesso.")
+        else:
+            await query.edit_message_text("⚠️ Usuário já está bloqueado.")
+
+    elif data.startswith("interagir_") and user_id in ADMINS:
+        alvo_id = int(data.split("_")[1])
+        await context.bot.send_message(
+            chat_id=alvo_id,
+            text="📣 Um administrador entrou em contato com você sobre sua denúncia. Por favor, responda aqui se desejar continuar."
+        )
+        await query.edit_message_text("✅ Mensagem enviada ao denunciante.")
+
+# Inicialização do bot
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("abrirdenuncia", abrir_denuncia))
