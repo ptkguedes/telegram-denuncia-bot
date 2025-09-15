@@ -197,7 +197,7 @@ async def interagir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 Comando restrito aos administradores.")
         return
     try:
-                partes = update.message.text.split(maxsplit=2)
+        partes = update.message.text.split(maxsplit=2)
         alvo_id = int(partes[1])
         mensagem = partes[2]
         await context.bot.send_message(chat_id=alvo_id, text=f"📣 Mensagem da moderação:\n{mensagem}")
