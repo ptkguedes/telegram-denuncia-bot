@@ -12,8 +12,6 @@ from moderacao import verificar_mensagem
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
-if not TOKEN:
-    raise ValueError("❌ BOT_TOKEN não está definido. Configure no .env ou nas variáveis do Railway.")
 
 ADMINS = [7477496964, 6439529867]  # Jake e Maria
 
