@@ -15,7 +15,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("❌ BOT_TOKEN não está definido. Configure no .env ou nas variáveis do Railway.")
 
-ADMINS = [7477496964, 6439529867]
+ADMINS = [7477496964, 6439529867]  # Jake e Maria
 
 DENUNCIAS_ARQUIVO = "denuncias.json"
 BLOQUEADOS_ARQUIVO = "bloqueados.json"
@@ -23,7 +23,7 @@ denuncias = []
 bloqueados = []
 denuncias_em_andamento = {}
 tempo_inatividade = {}
-conversas_ativas = {}  # chave: user_id do denunciante, valor: admin_id
+conversas_ativas = {}
 
 def carregar_denuncias():
     global denuncias
@@ -56,12 +56,6 @@ CATEGORIAS = {
     "cat_violencia": "Conteúdo violento",
     "cat_outro": "Outro"
 }
-
-def denuncia_sem_evidencia(mensagens):
-    texto = "\n".join([m["texto"].lower() for m in mensagens])
-    if "@" not in texto and "t.me/" not in texto and "[imagem]" not in texto:
-        return True
-    return False
 
 async def monitorar_inatividade(user_id, context):
     await asyncio.sleep(180)
@@ -107,7 +101,6 @@ async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.message.from_user.id
 
-    # Se o usuário está em conversa ativa com um admin
     if user_id in conversas_ativas:
         admin_id = conversas_ativas[user_id]
         texto = update.message.text.strip() if update.message.text else "[imagem]"
@@ -155,13 +148,6 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Nenhuma denúncia em andamento.")
         return
 
-    if denuncia_sem_evidencia(dados["mensagens"]):
-        await update.message.reply_text(
-            "⚠️ Sua denúncia parece estar sem evidências claras (como imagem, perfil ou @usuario).\n"
-            "Isso pode dificultar nossa atuação. Se possível, envie mais detalhes antes de finalizar."
-        )
-        return
-
     texto_completo = ""
     imagens = []
 
@@ -205,6 +191,8 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=admin_id, text=mensagem_admin, reply_markup=keyboard)
         for file_id in imagens:
             await context.bot.send_photo(chat_id=admin_id, photo=file_id)
+
+# 🔧 Comandos administrativos
 
 async def interagir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id not in ADMINS:
@@ -299,6 +287,7 @@ async def unblock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await update.message.reply_text("⚠️ Erro ao tentar desbloquear. Verifique o ID ou a mensagem marcada.")
 
+# 🎮 Callback geral para botões inline
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -334,9 +323,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text("✅ Mensagem enviada ao denunciante e canal de conversa ativado.")
 
-# Inicialização do bot
+# 🚀 Inicialização do bot
 app = ApplicationBuilder().token(TOKEN).build()
 
+# 📌 Registro de handlers
 app.add_handler(CommandHandler("abrirdenuncia", abrir_denuncia))
 app.add_handler(CommandHandler("enviar_denuncia", enviar_denuncia))
 app.add_handler(CommandHandler("cancelardenuncia", cancelar_denuncia))
@@ -347,6 +337,8 @@ app.add_handler(CommandHandler("encerrar", encerrar))
 app.add_handler(CommandHandler("unblock", unblock))
 app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, receber_mensagem))
 app.add_handler(CallbackQueryHandler(callback_handler))
-app.add_handler(MessageHandler(~filters.ChatType.PRIVATE, lambda update, context: None))
+app.add_handler(MessageHandler(~filters.ChatType.PRIVATE, lambda update, context: None))  # Ignora grupos
 
 app.run_polling()
+
+
