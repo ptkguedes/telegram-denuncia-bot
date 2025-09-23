@@ -163,6 +163,36 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"📥 Nova denúncia recebida de {user_id}:\nCategoria: {dados['categoria']}\nMensagens: {len(dados['mensagens'])}"
         )
 
+async def cancelar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user_id = update.effective_user.id
+    if chat.type != "private":
+        return
+    if user_id in denuncias_em_andamento:
+        denuncias_em_andamento.pop(user_id)
+        tempo_inatividade.pop(user_id, None)
+        await context.bot.send_message(chat_id=user_id, text="🚫 Sua denúncia foi cancelada. Nenhum dado foi enviado.")
+    else:
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Você não possui nenhuma denúncia em andamento.")
+
+async def estatisticas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user_id = update.effective_user.id
+    if chat.type != "private":
+        return
+    if user_id not in ADMINS:
+        await context.bot.send_message(chat_id=user_id, text="🚫 Você não tem permissão para visualizar estatísticas.")
+        return
+    contagem = {nome: 0 for nome in CATEGORIAS.values()}
+    for d in denuncias:
+        cat = d.get("categoria")
+        if cat in contagem:
+            contagem[cat] += 1
+    texto = "📊 Estatísticas de denúncias:\n"
+    for nome, qtd in contagem.items():
+        texto += f"• {nome}: {qtd}\n"
+    await context.bot.send_message(chat_id=user_id, text=texto)
+
 async def menu_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ADMINS:
@@ -175,7 +205,74 @@ async def menu_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✅ Lista de desbloqueados", callback_data="ver_desbloqueados")]
     ])
     await context.bot.send_message(chat_id=user_id, text="👮 Painel administrativo:", reply_markup=keyboard)
-   # 🎮 Callback geral para botões inline
+
+async def interagir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMINS:
+        await context.bot.send_message(chat_id=user_id, text="🚫 Comando restrito aos administradores.")
+        return
+    try:
+        partes = update.effective_message.text.split(maxsplit=2)
+        alvo_id = int(partes[1])
+        mensagem = partes[2]
+        conversas_ativas[alvo_id] = user_id
+        await context.bot.send_message(chat_id=alvo_id, text=f"📣 Mensagem da moderação:\n{mensagem}")
+        await context.bot.send_message(chat_id=user_id, text="✅ Mensagem enviada e canal de conversa ativado.")
+    except Exception:
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Uso correto: /interagir <user_id> <mensagem>")
+
+async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMINS:
+        await context.bot.send_message(chat_id=user_id, text="🚫 Comando restrito aos administradores.")
+        return
+    try:
+        partes = update.effective_message.text.split(maxsplit=2)
+        alvo_id = int(partes[1])
+        mensagem = partes[2]
+        await context.bot.send_message(chat_id=alvo_id, text=f"💬 Resposta da moderação:\n{mensagem}")
+        await context.bot.send_message(chat_id=user_id, text="✅ Resposta enviada ao denunciante.")
+    except Exception:
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Uso: /responder <user_id> <mensagem>")
+
+async def encerrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMINS:
+        await context.bot.send_message(chat_id=user_id, text="🚫 Comando restrito aos administradores.")
+        return
+    try:
+        alvo_id = int(context.args[0])
+        if alvo_id in conversas_ativas:
+            conversas_ativas.pop(alvo_id)
+            await context.bot.send_message(chat_id=user_id, text="✅ Conversa encerrada com sucesso.")
+        else:
+            await context.bot.send_message(chat_id=user_id, text="⚠️ Esse usuário não está em conversa ativa.")
+    except:
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Uso: /encerrar <user_id>")
+
+async def unblock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMINS:
+        await context.bot.send_message(chat_id=user_id, text="🚫 Comando restrito aos administradores.")
+        return
+    try:
+        if context.args:
+            alvo_id = int(context.args[0])
+        elif update.effective_message.reply_to_message:
+            alvo_id = update.effective_message.reply_to_message.from_user.id
+        else:
+            await context.bot.send_message(chat_id=user_id, text="⚠️ Uso: /unblock <user_id> ou responda à mensagem do usuário bloqueado.")
+            return
+
+        if alvo_id in bloqueados:
+            bloqueados.remove(alvo_id)
+            salvar_bloqueados()
+            await context.bot.send_message(chat_id=user_id, text=f"✅ Usuário {alvo_id} foi desbloqueado com sucesso.")
+        else:
+            await context.bot.send_message(chat_id=user_id, text="⚠️ Esse usuário não está bloqueado.")
+    except Exception:
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Erro ao tentar desbloquear. Verifique o ID ou a mensagem marcada.")
+        # 🎮 Callback geral para botões inline
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -257,6 +354,6 @@ app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, receber_mensagem))
 app.add_handler(CallbackQueryHandler(callback_handler))
 app.add_handler(MessageHandler(~filters.ChatType.PRIVATE, lambda update, context: None))  # Ignora grupos
 
-app.run_polling() 
+app.run_polling()
 
 
