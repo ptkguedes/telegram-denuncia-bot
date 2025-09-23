@@ -8,7 +8,6 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes
 )
-from moderacao import verificar_mensagem
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
@@ -21,6 +20,7 @@ denuncias = []
 bloqueados = []
 denuncias_em_andamento = {}
 tempo_inatividade = {}
+temporizadores_envio = {}
 conversas_ativas = {}
 
 def carregar_denuncias():
@@ -75,6 +75,26 @@ async def monitorar_inatividade(user_id, context):
                 text="🚫 Denúncia encerrada automaticamente por inatividade. Se desejar, você pode iniciar novamente."
             )
 
+async def iniciar_temporizador_envio(user_id, context):
+    if temporizadores_envio.get(user_id):
+        temporizadores_envio[user_id].cancel()
+
+    async def aguardar_e_sugerir_envio():
+        await asyncio.sleep(8)
+        if user_id in denuncias_em_andamento:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📨 Enviar denúncia", callback_data="menu_enviar")],
+                [InlineKeyboardButton("🚫 Cancelar denúncia", callback_data="menu_cancelar")],
+                [InlineKeyboardButton("✏️ Continuar denúncia", callback_data="menu_continuar")]
+            ])
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="📌 Mensagem registrada. Quando terminar, escolha uma opção abaixo:",
+                reply_markup=keyboard
+            )
+
+    temporizadores_envio[user_id] = asyncio.create_task(aguardar_e_sugerir_envio())
+
 async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user = update.effective_user
@@ -86,6 +106,13 @@ async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user_id in bloqueados:
         await context.bot.send_message(chat_id=user_id, text="🚫 Você está bloqueado e não pode enviar denúncias.")
+        return
+
+    if user_id in denuncias_em_andamento:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="⚠️ Você já possui uma denúncia em andamento.\nFinalize ou cancele antes de iniciar outra."
+        )
         return
 
     categorias = [[InlineKeyboardButton(nome, callback_data=key)] for key, nome in CATEGORIAS.items()]
@@ -129,26 +156,24 @@ async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_id = update.message.video.file_id
             denuncias_em_andamento[user_id]["mensagens"].append({"tipo": "video", "file_id": file_id})
         elif texto:
-            erro = verificar_mensagem(user_id, texto)
-            if erro:
-                await context.bot.send_message(chat_id=user_id, text=erro)
-                return
             denuncias_em_andamento[user_id]["mensagens"].append(texto)
 
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📨 Enviar denúncia", callback_data="menu_enviar")],
-            [InlineKeyboardButton("🚫 Cancelar denúncia", callback_data="menu_cancelar")]
-        ])
-        await context.bot.send_message(chat_id=user_id, text="📌 Mensagem registrada. Quando terminar, escolha uma opção abaixo:", reply_markup=keyboard)
+        await iniciar_temporizador_envio(user_id, context)
         return
 
     if user_id in ADMINS:
-        await menu_admin(update, context)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 Abrir denúncia", callback_data="menu_abrir")],
+            [InlineKeyboardButton("📂 Denúncias recentes", callback_data="menu_recentes")],
+            [InlineKeyboardButton("📊 Painel de moderação", callback_data="menu_painel")]
+        ])
+        await context.bot.send_message(chat_id=user_id, text="👋 Painel administrativo:", reply_markup=keyboard)
     else:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 Abrir denúncia", callback_data="menu_abrir")]
         ])
         await context.bot.send_message(chat_id=user_id, text="👋 Olá! Bem-vindo ao sistema de denúncias.\nEscolha uma opção abaixo:", reply_markup=keyboard)
+
 async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in denuncias_em_andamento:
@@ -192,7 +217,6 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_photo(chat_id=admin_id, photo=arquivo_id)
                 elif tipo == "video":
                     await context.bot.send_video(chat_id=admin_id, video=arquivo_id)
-
 async def cancelar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in denuncias_em_andamento:
@@ -224,8 +248,9 @@ async def menu_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 Abrir denúncia", callback_data="menu_abrir")],
+        [InlineKeyboardButton("📂 Ver denúncias recentes", callback_data="menu_recentes")],
         [InlineKeyboardButton("📊 Ver estatísticas", callback_data="ver_estatisticas")],
-        [InlineKeyboardButton("📥 Ver denúncias recentes", callback_data="ver_denuncias")],
         [InlineKeyboardButton("✅ Lista de desbloqueados", callback_data="ver_desbloqueados")]
     ])
     await context.bot.send_message(chat_id=user_id, text="👮 Painel administrativo:", reply_markup=keyboard)
@@ -243,6 +268,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await enviar_denuncia(update, context)
     elif data == "menu_cancelar":
         await cancelar_denuncia(update, context)
+    elif data == "menu_continuar":
+        await context.bot.send_message(chat_id=user_id, text="✏️ Continue enviando mensagens com evidências.")
     elif data in CATEGORIAS:
         denuncias_em_andamento[user_id] = {
             "categoria": CATEGORIAS[data],
@@ -261,25 +288,44 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("⚠️ Usuário já está bloqueado.")
     elif data.startswith("interagir_") and user_id in ADMINS:
         alvo_id = int(data.split("_")[1])
-        conversas_ativas[alvo_id] = user_id
-        await context.bot.send_message(
-            chat_id=alvo_id,
-            text="📣 Um administrador entrou em contato com você sobre sua denúncia. Por favor, responda aqui se desejar continuar."
+        mensagem = (
+            "📣 Recebemos a sua denúncia, a tratativa será aplicada conforme grau de severidade. "
+            "Você está recebendo esta mensagem caso os administradores precisem entrar em contato. Obrigado!"
         )
-        if context.bot_data.get(f"denuncia_enviada_{alvo_id}"):
-            botoes = [
-                InlineKeyboardButton("✏️ Responder ao denunciante", callback_data=f"responder_{alvo_id}")
-            ]
-            markup = InlineKeyboardMarkup([botoes])
-            await query.edit_message_reply_markup(reply_markup=markup)
-        else:
-            await query.edit_message_text("✅ Mensagem enviada ao denunciante e canal de conversa ativado.")
+        await context.bot.send_message(chat_id=alvo_id, text=mensagem)
+        await query.edit_message_text("✅ Confirmação de recebimento enviada ao denunciante.")
     elif data.startswith("responder_") and user_id in ADMINS:
         alvo_id = int(data.split("_")[1])
         context.user_data["resposta_alvo"] = alvo_id
         await context.bot.send_message(chat_id=user_id, text="✏️ Digite a mensagem que deseja enviar ao denunciante.")
     elif data == "ver_estatisticas" and user_id in ADMINS:
         await estatisticas(update, context)
+    elif data == "menu_recentes" and user_id in ADMINS:
+        ultimas = list(enumerate(denuncias))[-10:]
+        if not ultimas:
+            await context.bot.send_message(chat_id=user_id, text="📭 Nenhuma denúncia registrada.")
+            return
+
+        for i, dados in reversed(ultimas):
+            resumo = dados.get("mensagens", ["(sem conteúdo)"])[0]
+            autor_id = dados.get("user_id", "desconhecido")
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗑️ Deletar denúncia", callback_data=f"deletar_{i}")],
+                [InlineKeyboardButton("💬 Interagir com denunciante", callback_data=f"interagir_{autor_id}")]
+            ])
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"📝 Denúncia #{i}\n👤 Autor: {autor_id}\n📄 Conteúdo: {str(resumo)[:100]}...",
+                reply_markup=keyboard
+            )
+    elif data.startswith("deletar_") and user_id in ADMINS:
+        denuncia_id = int(data.split("_")[1])
+        if 0 <= denuncia_id < len(denuncias):
+            denuncias.pop(denuncia_id)
+            salvar_denuncias()
+            await query.edit_message_text("🗑️ Denúncia deletada com sucesso.")
+        else:
+            await query.edit_message_text("⚠️ Denúncia não encontrada.")
 
 # 🚀 Inicialização do bot
 app = ApplicationBuilder().token(TOKEN).build()
@@ -293,4 +339,4 @@ app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, rec
 app.add_handler(CallbackQueryHandler(callback_handler))
 app.add_handler(MessageHandler(~filters.ChatType.PRIVATE, lambda update, context: None))
 
-app.run_polling()
+app.run_polling() 
