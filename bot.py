@@ -92,7 +92,7 @@ async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=admin_id,
             text=f"👤 Novo usuário iniciou uma denúncia:\nID: {user_id}\nUsername: @{username}"
         )
-        async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
 
