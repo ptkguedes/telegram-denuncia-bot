@@ -289,8 +289,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("interagir_") and user_id in ADMINS:
         alvo_id = int(data.split("_")[1])
         mensagem = (
-            "📣 Recebemos a sua denúncia, a tratativa será aplicada conforme grau de severidade. "
-            "Você está recebendo esta mensagem caso os administradores precisem entrar em contato. Obrigado!"
+            "📣 Recebemos a sua denúncia, a tratativa será aplicada conforme gravidade do ocorrido. "
+            "Entraremos em contato com você caso haja necessidade de mais detalhes. Obrigado!"
         )
         await context.bot.send_message(chat_id=alvo_id, text=mensagem)
         await query.edit_message_text("✅ Confirmação de recebimento enviada ao denunciante.")
