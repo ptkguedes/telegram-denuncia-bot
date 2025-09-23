@@ -119,13 +119,20 @@ async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_id in denuncias_em_andamento:
-        erro = verificar_mensagem(user_id, texto)
-        if erro:
-            await context.bot.send_message(chat_id=user_id, text=erro)
-            return
-
-        denuncias_em_andamento[user_id]["mensagens"].append(texto)
         tempo_inatividade[user_id] = datetime.datetime.now()
+
+        if update.message.photo:
+            file_id = update.message.photo[-1].file_id
+            denuncias_em_andamento[user_id]["mensagens"].append({"tipo": "photo", "file_id": file_id})
+        elif update.message.video:
+            file_id = update.message.video.file_id
+            denuncias_em_andamento[user_id]["mensagens"].append({"tipo": "video", "file_id": file_id})
+        elif texto:
+            erro = verificar_mensagem(user_id, texto)
+            if erro:
+                await context.bot.send_message(chat_id=user_id, text=erro)
+                return
+            denuncias_em_andamento[user_id]["mensagens"].append(texto)
 
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📨 Enviar denúncia", callback_data="menu_enviar")],
@@ -157,122 +164,35 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(chat_id=user_id, text="✅ Denúncia enviada com sucesso. Obrigado por colaborar!")
 
+    context.bot_data[f"denuncia_enviada_{user_id}"] = True
+
     for admin_id in ADMINS:
-        await context.bot.send_message(
-            chat_id=admin_id,
-            text=f"📥 Nova denúncia recebida de {user_id}:\nCategoria: {dados['categoria']}\nMensagens: {len(dados['mensagens'])}"
+        cabecalho = (
+            f"📥 Nova denúncia recebida:\n"
+            f"👤 Usuário: {user_id}\n"
+            f"📂 Categoria: {dados['categoria']}\n"
+            f"🕒 Horário: {dados['timestamp']}\n"
+            f"📎 Total de mensagens: {len(dados['mensagens'])}"
         )
 
-async def cancelar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    user_id = update.effective_user.id
-    if chat.type != "private":
-        return
-    if user_id in denuncias_em_andamento:
-        denuncias_em_andamento.pop(user_id)
-        tempo_inatividade.pop(user_id, None)
-        await context.bot.send_message(chat_id=user_id, text="🚫 Sua denúncia foi cancelada. Nenhum dado foi enviado.")
-    else:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Você não possui nenhuma denúncia em andamento.")
+        botoes = []
+        if user_id not in bloqueados:
+            botoes.append(InlineKeyboardButton("🚫 Bloquear usuário", callback_data=f"bloquear_{user_id}"))
+        botoes.append(InlineKeyboardButton("💬 Interagir com denunciante", callback_data=f"interagir_{user_id}"))
+        markup = InlineKeyboardMarkup([botoes])
 
-async def estatisticas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    user_id = update.effective_user.id
-    if chat.type != "private":
-        return
-    if user_id not in ADMINS:
-        await context.bot.send_message(chat_id=user_id, text="🚫 Você não tem permissão para visualizar estatísticas.")
-        return
-    contagem = {nome: 0 for nome in CATEGORIAS.values()}
-    for d in denuncias:
-        cat = d.get("categoria")
-        if cat in contagem:
-            contagem[cat] += 1
-    texto = "📊 Estatísticas de denúncias:\n"
-    for nome, qtd in contagem.items():
-        texto += f"• {nome}: {qtd}\n"
-    await context.bot.send_message(chat_id=user_id, text=texto)
+        await context.bot.send_message(chat_id=admin_id, text=cabecalho, reply_markup=markup)
 
-async def menu_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMINS:
-        await context.bot.send_message(chat_id=user_id, text="🚫 Menu exclusivo para administradores.")
-        return
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Ver estatísticas", callback_data="ver_estatisticas")],
-        [InlineKeyboardButton("📥 Ver denúncias recentes", callback_data="ver_denuncias")],
-        [InlineKeyboardButton("✅ Lista de desbloqueados", callback_data="ver_desbloqueados")]
-    ])
-    await context.bot.send_message(chat_id=user_id, text="👮 Painel administrativo:", reply_markup=keyboard)
-
-async def interagir(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMINS:
-        await context.bot.send_message(chat_id=user_id, text="🚫 Comando restrito aos administradores.")
-        return
-    try:
-        partes = update.effective_message.text.split(maxsplit=2)
-        alvo_id = int(partes[1])
-        mensagem = partes[2]
-        conversas_ativas[alvo_id] = user_id
-        await context.bot.send_message(chat_id=alvo_id, text=f"📣 Mensagem da moderação:\n{mensagem}")
-        await context.bot.send_message(chat_id=user_id, text="✅ Mensagem enviada e canal de conversa ativado.")
-    except Exception:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Uso correto: /interagir <user_id> <mensagem>")
-
-async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMINS:
-        await context.bot.send_message(chat_id=user_id, text="🚫 Comando restrito aos administradores.")
-        return
-    try:
-        partes = update.effective_message.text.split(maxsplit=2)
-        alvo_id = int(partes[1])
-        mensagem = partes[2]
-        await context.bot.send_message(chat_id=alvo_id, text=f"💬 Resposta da moderação:\n{mensagem}")
-        await context.bot.send_message(chat_id=user_id, text="✅ Resposta enviada ao denunciante.")
-    except Exception:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Uso: /responder <user_id> <mensagem>")
-
-async def encerrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMINS:
-        await context.bot.send_message(chat_id=user_id, text="🚫 Comando restrito aos administradores.")
-        return
-    try:
-        alvo_id = int(context.args[0])
-        if alvo_id in conversas_ativas:
-            conversas_ativas.pop(alvo_id)
-            await context.bot.send_message(chat_id=user_id, text="✅ Conversa encerrada com sucesso.")
-        else:
-            await context.bot.send_message(chat_id=user_id, text="⚠️ Esse usuário não está em conversa ativa.")
-    except:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Uso: /encerrar <user_id>")
-
-async def unblock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMINS:
-        await context.bot.send_message(chat_id=user_id, text="🚫 Comando restrito aos administradores.")
-        return
-    try:
-        if context.args:
-            alvo_id = int(context.args[0])
-        elif update.effective_message.reply_to_message:
-            alvo_id = update.effective_message.reply_to_message.from_user.id
-        else:
-            await context.bot.send_message(chat_id=user_id, text="⚠️ Uso: /unblock <user_id> ou responda à mensagem do usuário bloqueado.")
-            return
-
-        if alvo_id in bloqueados:
-            bloqueados.remove(alvo_id)
-            salvar_bloqueados()
-            await context.bot.send_message(chat_id=user_id, text=f"✅ Usuário {alvo_id} foi desbloqueado com sucesso.")
-        else:
-            await context.bot.send_message(chat_id=user_id, text="⚠️ Esse usuário não está bloqueado.")
-    except Exception:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Erro ao tentar desbloquear. Verifique o ID ou a mensagem marcada.")
-        # 🎮 Callback geral para botões inline
+        for item in dados["mensagens"]:
+            if isinstance(item, str):
+                await context.bot.send_message(chat_id=admin_id, text=f"📝 {item}")
+            elif isinstance(item, dict):
+                tipo = item.get("tipo")
+                arquivo_id = item.get("file_id")
+                if tipo == "photo":
+                    await context.bot.send_photo(chat_id=admin_id, photo=arquivo_id)
+                elif tipo == "video":
+                    await context.bot.send_video(chat_id=admin_id, video=arquivo_id)
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -327,7 +247,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=alvo_id,
             text="📣 Um administrador entrou em contato com você sobre sua denúncia. Por favor, responda aqui se desejar continuar."
         )
-        await query.edit_message_text("✅ Mensagem enviada ao denunciante e canal de conversa ativado.")
+
+        # Se denúncia foi enviada, mostra botão de resposta
+        if context.bot_data.get(f"denuncia_enviada_{alvo_id}"):
+            botoes = [
+                InlineKeyboardButton("✏️ Responder ao denunciante", callback_data=f"responder_{alvo_id}")
+            ]
+            markup = InlineKeyboardMarkup([botoes])
+            await query.edit_message_reply_markup(reply_markup=markup)
+        else:
+            await query.edit_message_text("✅ Mensagem enviada ao denunciante e canal de conversa ativado.")
 
     elif data.startswith("responder_") and user_id in ADMINS:
         alvo_id = int(data.split("_")[1])
@@ -350,10 +279,8 @@ app.add_handler(CommandHandler("interagir", interagir))
 app.add_handler(CommandHandler("responder", responder))
 app.add_handler(CommandHandler("encerrar", encerrar))
 app.add_handler(CommandHandler("unblock", unblock))
-app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, receber_mensagem))
+app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, receber_mensagem))
 app.add_handler(CallbackQueryHandler(callback_handler))
 app.add_handler(MessageHandler(~filters.ChatType.PRIVATE, lambda update, context: None))  # Ignora grupos
 
 app.run_polling()
-
-
