@@ -125,7 +125,7 @@ async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=admin_id,
             text=f"👤 Novo usuário iniciou uma denúncia:\nID: {user_id}\nUsername: @{username}"
         )
-        async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in denuncias_em_andamento:
         await context.bot.send_message(chat_id=user_id, text="⚠️ Você não possui nenhuma denúncia em andamento.")
