@@ -66,7 +66,7 @@ async def monitorar_inatividade(user_id, context):
             text="👋 Ei, ainda está aí?\nSe não for continuar com a denúncia, ela será fechada automaticamente por inatividade."
         )
         await asyncio.sleep(30)
-        ultimo = tempo_inatividade.get(user_id
+        ultimo = tempo_inatividade.get(user_id)
                                       
     if (datetime.datetime.now() - ultimo).total_seconds() >= 210:
         dados = denuncias_em_andamento.pop(user_id, None)
