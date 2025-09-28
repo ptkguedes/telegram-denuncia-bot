@@ -66,10 +66,11 @@ async def monitorar_inatividade(user_id, context):
             text="👋 Ei, ainda está aí?\nSe não for continuar com a denúncia, ela será fechada automaticamente por inatividade."
         )
         await asyncio.sleep(30)
-        ultimo = tempo_inatividade.get(user_id)
-        if (datetime.datetime.now() - ultimo).total_seconds() >= 210:
-    dados = denuncias_em_andamento.pop(user_id, None)
-    tempo_inatividade.pop(user_id, None)
+        ultimo = tempo_inatividade.get(user_id
+                                      
+    if (datetime.datetime.now() - ultimo).total_seconds() >= 210:
+        dados = denuncias_em_andamento.pop(user_id, None)
+        tempo_inatividade.pop(user_id, None)
 
     await context.bot.send_message(
         chat_id=user_id,
@@ -77,6 +78,7 @@ async def monitorar_inatividade(user_id, context):
     )
 
     # Notificar admins
+    
     categoria = dados.get("categoria", "Não especificada") if dados else "Não especificada"
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for admin_id in ADMINS:
