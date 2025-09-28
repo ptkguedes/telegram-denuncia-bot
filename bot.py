@@ -68,13 +68,27 @@ async def monitorar_inatividade(user_id, context):
         await asyncio.sleep(30)
         ultimo = tempo_inatividade.get(user_id)
         if (datetime.datetime.now() - ultimo).total_seconds() >= 210:
-            denuncias_em_andamento.pop(user_id, None)
-            tempo_inatividade.pop(user_id, None)
-            await context.bot.send_message(
-                chat_id=user_id,
-                text="🚫 Denúncia encerrada automaticamente por inatividade. Se desejar, você pode iniciar novamente."
-            )
+    dados = denuncias_em_andamento.pop(user_id, None)
+    tempo_inatividade.pop(user_id, None)
 
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="🚫 Denúncia encerrada automaticamente por inatividade. Se desejar, você pode iniciar novamente."
+    )
+
+    # Notificar admins
+    categoria = dados.get("categoria", "Não especificada") if dados else "Não especificada"
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for admin_id in ADMINS:
+        await context.bot.send_message(
+            chat_id=admin_id,
+            text=(
+                f"⚠️ Denúncia encerrada por inatividade:\n"
+                f"👤 Usuário: {user_id}\n"
+                f"📂 Categoria: {categoria}\n"
+                f"🕒 Horário: {timestamp}"
+            )
+        )
 async def iniciar_temporizador_envio(user_id, context):
     if temporizadores_envio.get(user_id):
         temporizadores_envio[user_id].cancel()
