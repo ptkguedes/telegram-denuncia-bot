@@ -63,13 +63,15 @@ async def verificar_membro(bot, grupo_id, user_id):
     except:
         return False
 async def monitorar_inatividade(user_id, context):
-       await asyncio.sleep(180)
-           ultimo = tempo_inatividade.get(user_id)
-       if not ultimo or user_id not in denuncias_em_andamento:
+    await asyncio.sleep(180)
+    ultimo = tempo_inatividade.get(user_id)
+
+    if not ultimo or user_id not in denuncias_em_andamento:
         return
-       if (datetime.datetime.now() - ultimo).total_seconds() >= 210:
-           dados = denuncias_em_andamento.pop(user_id, None)
-           tempo_inatividade.pop(user_id, None)
+
+    if (datetime.datetime.now() - ultimo).total_seconds() >= 210:
+        dados = denuncias_em_andamento.pop(user_id, None)
+        tempo_inatividade.pop(user_id, None)
 
         await context.bot.send_message(
             chat_id=user_id,
