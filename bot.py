@@ -217,7 +217,9 @@ async def tratar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "mensagens": []
         }
         tempo_inatividade[user_id] = datetime.datetime.now()
-        await query.edit_message_text(f"✅ Categoria selecionada: {CATEGORIAS[query.data]}\nAgora envie sua denúncia com detalhes.")
+        await query.edit_message_text(
+            f"✅ Categoria selecionada: {CATEGORIAS[query.data]}\nAgora envie sua denúncia com detalhes."
+        )
         asyncio.create_task(monitorar_inatividade(user_id, context))
 
     elif query.data == "menu_enviar":
@@ -253,7 +255,8 @@ async def tratar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📁 Total de denúncias: {total}\n"
             f"🚫 Usuários bloqueados: {bloqueados_count}"
         )
-elif query.data == "ver_bloqueados":
+
+    elif query.data == "ver_bloqueados":
         if bloqueados:
             lista = "\n".join(str(uid) for uid in bloqueados)
             await query.message.reply_text(f"🚫 Usuários bloqueados:\n{lista}")
@@ -268,5 +271,5 @@ def main():
     app.add_handler(CallbackQueryHandler(tratar_callback))
     app.run_polling()
 
-if name == "main":
+if _name_ == "_main_":
     main()
