@@ -11,6 +11,7 @@ from telegram.ext import (
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
+GROUP_ID = int(os.getenv("GROUP_ID"))  # ID do grupo para verificação de membro
 
 ADMINS = [7477496964, 6439529867]  # Jake e Maria
 
@@ -55,22 +56,20 @@ CATEGORIAS = {
     "cat_outro": "Outro"
 }
 
+async def verificar_membro(bot, grupo_id, user_id):
+    try:
+        membro = await bot.get_chat_member(grupo_id, user_id)
+        return membro.status in ["member", "administrator", "creator"]
+    except:
+        return False
 async def monitorar_inatividade(user_id, context):
-    await asyncio.sleep(180)
-    ultimo = tempo_inatividade.get(user_id)
-    if not ultimo or user_id not in denuncias_em_andamento:
+       await asyncio.sleep(180)
+           ultimo = tempo_inatividade.get(user_id)
+       if not ultimo or user_id not in denuncias_em_andamento:
         return
-    if (datetime.datetime.now() - ultimo).total_seconds() >= 180:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="👋 Ei, ainda está aí?\nSe não for continuar com a denúncia, ela será fechada automaticamente por inatividade."
-        )
-        await asyncio.sleep(30)
-        ultimo = tempo_inatividade.get(user_id)
-
-    if (datetime.datetime.now() - ultimo).total_seconds() >= 210:
-        dados = denuncias_em_andamento.pop(user_id, None)
-        tempo_inatividade.pop(user_id, None)
+       if (datetime.datetime.now() - ultimo).total_seconds() >= 210:
+           dados = denuncias_em_andamento.pop(user_id, None)
+           tempo_inatividade.pop(user_id, None)
 
         await context.bot.send_message(
             chat_id=user_id,
@@ -79,12 +78,16 @@ async def monitorar_inatividade(user_id, context):
 
         categoria = dados.get("categoria", "Não especificada") if dados else "Não especificada"
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        is_member = await verificar_membro(context.bot, GROUP_ID, user_id)
+        membro_status = "Membro ✅" if is_member else "Membro ❌"
+
         for admin_id in ADMINS:
             await context.bot.send_message(
                 chat_id=admin_id,
                 text=(
                     f"⚠️ Denúncia encerrada por inatividade:\n"
                     f"👤 Usuário: {user_id}\n"
+                    f"{membro_status}\n"
                     f"📂 Categoria: {categoria}\n"
                     f"🕒 Horário: {timestamp}"
                 )
@@ -138,61 +141,19 @@ async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(chat_id=user_id, text="Escolha a categoria da denúncia:", reply_markup=markup)
 
+    is_member = await verificar_membro(context.bot, GROUP_ID, user_id)
+    membro_status = "Membro ✅" if is_member else "Membro ❌"
+
     for admin_id in ADMINS:
         await context.bot.send_message(
             chat_id=admin_id,
-            text=f"👤 Novo usuário iniciou uma denúncia:\nID: {user_id}\nUsername: @{username}"
+            text=(
+                f"👤 Novo usuário iniciou uma denúncia:\n"
+                f"ID: {user_id}\n"
+                f"Username: @{username}\n"
+                f"{membro_status}"
+            )
         )
-
-async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    user = update.effective_user
-    user_id = user.id
-
-    if chat.type != "private":
-        return
-
-    texto = update.effective_message.text or ""
-    if user_id in conversas_ativas:
-        admin_id = conversas_ativas[user_id]
-        await context.bot.send_message(chat_id=admin_id, text=f"📨 Resposta de {user_id}:\n{texto}")
-        return
-
-    if user_id in context.user_data and "resposta_alvo" in context.user_data:
-        alvo_id = context.user_data.pop("resposta_alvo")
-        await context.bot.send_message(chat_id=alvo_id, text=f"💬 Mensagem da moderação:\n{texto}")
-        await context.bot.send_message(chat_id=user_id, text="✅ Mensagem enviada ao denunciante.")
-        return
-
-    if user_id in denuncias_em_andamento:
-        tempo_inatividade[user_id] = datetime.datetime.now()
-
-        if update.message.photo:
-            file_id = update.message.photo[-1].file_id
-            denuncias_em_andamento[user_id]["mensagens"].append({"tipo": "photo", "file_id": file_id})
-        elif update.message.video:
-            file_id = update.message.video.file_id
-            denuncias_em_andamento[user_id]["mensagens"].append({"tipo": "video", "file_id": file_id})
-        elif texto:
-            denuncias_em_andamento[user_id]["mensagens"].append(texto)
-
-        await iniciar_temporizador_envio(user_id, context)
-        return
-
-    if user_id in ADMINS:
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Abrir denúncia", callback_data="menu_abrir")],
-            [InlineKeyboardButton("📂 Denúncias recentes", callback_data="menu_recentes")],
-            [InlineKeyboardButton("📊 Painel de moderação", callback_data="ver_estatisticas")],
-            [InlineKeyboardButton("🚫 Usuários bloqueados", callback_data="ver_bloqueados")]
-        ])
-        await context.bot.send_message(chat_id=user_id, text="👋 Painel administrativo:", reply_markup=keyboard)
-    else:
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Abrir denúncia", callback_data="menu_abrir")]
-        ])
-        await context.bot.send_message(chat_id=user_id, text="👋 Olá! Bem-vindo ao sistema de denúncias.\nEscolha uma opção abaixo:", reply_markup=keyboard)
-
 async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in denuncias_em_andamento:
@@ -209,10 +170,14 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=user_id, text="✅ Denúncia enviada com sucesso. Obrigado por colaborar!")
     context.bot_data[f"denuncia_enviada_{user_id}"] = True
 
+    is_member = await verificar_membro(context.bot, GROUP_ID, user_id)
+    membro_status = "Membro ✅" if is_member else "Membro ❌"
+
     for admin_id in ADMINS:
         cabecalho = (
-                        f"📥 Nova denúncia recebida:\n"
+            f"📥 Nova denúncia recebida:\n"
             f"👤 Usuário: {user_id}\n"
+            f"{membro_status}\n"
             f"📂 Categoria: {dados['categoria']}\n"
             f"🕒 Horário: {dados['timestamp']}\n"
             f"📎 Total de mensagens: {len(dados['mensagens'])}"
@@ -286,8 +251,7 @@ async def tratar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📁 Total de denúncias: {total}\n"
             f"🚫 Usuários bloqueados: {bloqueados_count}"
         )
-
-    elif query.data == "ver_bloqueados":
+elif query.data == "ver_bloqueados":
         if bloqueados:
             lista = "\n".join(str(uid) for uid in bloqueados)
             await query.message.reply_text(f"🚫 Usuários bloqueados:\n{lista}")
@@ -302,6 +266,5 @@ def main():
     app.add_handler(CallbackQueryHandler(tratar_callback))
     app.run_polling()
 
-if __name__ == "__main__":
+if name == "main":
     main()
-
