@@ -62,13 +62,12 @@ async def verificar_membro(bot, grupo_id, user_id):
         return membro.status in ["member", "administrator", "creator"]
     except:
         return False
+
 async def monitorar_inatividade(user_id, context):
     await asyncio.sleep(180)
     ultimo = tempo_inatividade.get(user_id)
-
     if not ultimo or user_id not in denuncias_em_andamento:
         return
-
     if (datetime.datetime.now() - ultimo).total_seconds() >= 210:
         dados = denuncias_em_andamento.pop(user_id, None)
         tempo_inatividade.pop(user_id, None)
@@ -156,13 +155,70 @@ async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"{membro_status}"
             )
         )
+
+async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    user_id = user.id
+
+    if chat.type != "private":
+        return
+
+    texto = update.effective_message.text or ""
+    if user_id in conversas_ativas:
+        admin_id = conversas_ativas[user_id]
+        await context.bot.send_message(chat_id=admin_id, text=f"📨 Resposta de {user_id}:\n{texto}")
+        return
+
+    if user_id in context.user_data and "resposta_alvo" in context.user_data:
+        alvo_id = context.user_data.pop("resposta_alvo")
+        await context.bot.send_message(chat_id=alvo_id, text=f"💬 Mensagem da moderação:\n{texto}")
+        await context.bot.send_message(chat_id=user_id, text="✅ Mensagem enviada ao denunciante.")
+        return
+
+    if user_id in denuncias_em_andamento:
+        tempo_inatividade[user_id] = datetime.datetime.now()
+
+        if update.message.photo:
+            file_id = update.message.photo[-1].file_id
+            denuncias_em_andamento[user_id]["mensagens"].append({"tipo": "photo", "file_id": file_id})
+        elif update.message.video:
+            file_id = update.message.video.file_id
+            denuncias_em_andamento[user_id]["mensagens"].append({"tipo": "video", "file_id": file_id})
+        elif texto:
+            denuncias_em_andamento[user_id]["mensagens"].append(texto)
+
+        await iniciar_temporizador_envio(user_id, context)
+        return
+
+    is_member = await verificar_membro(context.bot, GROUP_ID, user_id)
+    membro_status = "Membro ✅" if is_member else "Membro ❌"
+
+    if user_id in ADMINS:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 Abrir denúncia", callback_data="menu_abrir")],
+            [InlineKeyboardButton("📂 Denúncias recentes", callback_data="menu_recentes")],
+            [InlineKeyboardButton("📊 Painel de moderação", callback_data="ver_estatisticas")],
+            [InlineKeyboardButton("🚫 Usuários bloqueados", callback_data="ver_bloqueados")]
+        ])
+        await context.bot.send_message(chat_id=user_id, text="👋 Painel administrativo:", reply_markup=keyboard)
+    else:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 Abrir denúncia", callback_data="menu_abrir")]
+        ])
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"👋 Olá! Bem-vindo ao sistema de denúncias.\n{membro_status}\nEscolha uma opção abaixo:",
+            reply_markup=keyboard
+        )
+
 async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in denuncias_em_andamento:
         await context.bot.send_message(chat_id=user_id, text="⚠️ Você não possui nenhuma denúncia em andamento.")
         return
 
-    dados = denuncias_em_andamento.pop(user_id)
+        dados = denuncias_em_andamento.pop(user_id)
     tempo_inatividade.pop(user_id, None)
     dados["user_id"] = user_id
     dados["timestamp"] = datetime.datetime.now().isoformat()
@@ -171,40 +227,6 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(chat_id=user_id, text="✅ Denúncia enviada com sucesso. Obrigado por colaborar!")
     context.bot_data[f"denuncia_enviada_{user_id}"] = True
-
-    is_member = await verificar_membro(context.bot, GROUP_ID, user_id)
-    membro_status = "Membro ✅" if is_member else "Membro ❌"
-
-    for admin_id in ADMINS:
-        cabecalho = (
-            f"📥 Nova denúncia recebida:\n"
-            f"👤 Usuário: {user_id}\n"
-            f"{membro_status}\n"
-            f"📂 Categoria: {dados['categoria']}\n"
-            f"🕒 Horário: {dados['timestamp']}\n"
-            f"📎 Total de mensagens: {len(dados['mensagens'])}"
-        )
-        await context.bot.send_message(chat_id=admin_id, text=cabecalho)
-
-        for item in dados["mensagens"]:
-            if isinstance(item, str):
-                await context.bot.send_message(chat_id=admin_id, text=f"📝 {item}")
-            elif isinstance(item, dict):
-                tipo = item.get("tipo")
-                file_id = item.get("file_id")
-                if tipo == "photo":
-                    await context.bot.send_photo(chat_id=admin_id, photo=file_id)
-                elif tipo == "video":
-                    await context.bot.send_video(chat_id=admin_id, video=file_id)
-
-async def cancelar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id in denuncias_em_andamento:
-        denuncias_em_andamento.pop(user_id)
-        tempo_inatividade.pop(user_id, None)
-        await context.bot.send_message(chat_id=user_id, text="🚫 Denúncia cancelada.")
-    else:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Nenhuma denúncia em andamento para cancelar.")
 
 async def tratar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -217,16 +239,16 @@ async def tratar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "mensagens": []
         }
         tempo_inatividade[user_id] = datetime.datetime.now()
-        await query.edit_message_text(
-            f"✅ Categoria selecionada: {CATEGORIAS[query.data]}\nAgora envie sua denúncia com detalhes."
-        )
+        await query.edit_message_text(f"✅ Categoria selecionada: {CATEGORIAS[query.data]}\nAgora envie sua denúncia com detalhes.")
         asyncio.create_task(monitorar_inatividade(user_id, context))
 
     elif query.data == "menu_enviar":
         await enviar_denuncia(update, context)
 
     elif query.data == "menu_cancelar":
-        await cancelar_denuncia(update, context)
+        denuncias_em_andamento.pop(user_id, None)
+        tempo_inatividade.pop(user_id, None)
+        await query.edit_message_text("🚫 Denúncia cancelada.")
 
     elif query.data == "menu_continuar":
         await query.edit_message_text("✏️ Continue enviando mensagens para complementar sua denúncia.")
