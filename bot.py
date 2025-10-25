@@ -218,7 +218,7 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=user_id, text="⚠️ Você não possui nenhuma denúncia em andamento.")
         return
 
-        dados = denuncias_em_andamento.pop(user_id)
+    dados = denuncias_em_andamento.pop(user_id)
     tempo_inatividade.pop(user_id, None)
     dados["user_id"] = user_id
     dados["timestamp"] = datetime.datetime.now().isoformat()
