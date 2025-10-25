@@ -87,8 +87,10 @@ async def iniciar_temporizador_envio(user_id, context):
             )
 
     temporizadores_envio[user_id] = asyncio.create_task(aguardar_e_sugerir_envio())
+      temporizadores_inatividade = {}
 
 async def monitorar_inatividade(user_id, context):
+    # Cancela monitoramento anterior, se existir
     if user_id in temporizadores_inatividade:
         temporizadores_inatividade[user_id].cancel()
 
@@ -97,7 +99,19 @@ async def monitorar_inatividade(user_id, context):
         ultimo = tempo_inatividade.get(user_id)
         if not ultimo or user_id not in denuncias_em_andamento:
             return
-        if (datetime.datetime.now() - ultimo).total_seconds() >= 180:
+
+        # Envia aviso de inatividade
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="👀 Ei, ainda está aí? Se não continuar sua denúncia, ela será encerrada por inatividade."
+        )
+
+        await asyncio.sleep(120)
+        ultimo = tempo_inatividade.get(user_id)
+        if not ultimo or user_id not in denuncias_em_andamento:
+            return
+
+        if (datetime.datetime.now() - ultimo).total_seconds() >= 300:
             dados = denuncias_em_andamento.pop(user_id, None)
             tempo_inatividade.pop(user_id, None)
 
