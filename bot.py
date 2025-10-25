@@ -188,7 +188,29 @@ async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
             denuncias_em_andamento[user_id]["mensagens"].append(texto)
 
         await iniciar_temporizador_envio(user_id, context)
+        asyncio.create_task(monitorar_inatividade(user_id, context))  # ✅ reinicia monitoramento
         return
+
+    is_member = await verificar_membro(context.bot, GROUP_ID, user_id)
+    membro_status = "Membro ✅" if is_member else "Membro ❌"
+
+    if user_id in ADMINS:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 Abrir denúncia", callback_data="menu_abrir")],
+            [InlineKeyboardButton("📂 Denúncias recentes", callback_data="menu_recentes")],
+            [InlineKeyboardButton("📊 Painel de moderação", callback_data="ver_estatisticas")],
+            [InlineKeyboardButton("🚫 Usuários bloqueados", callback_data="ver_bloqueados")]
+        ])
+        await context.bot.send_message(chat_id=user_id, text="👋 Painel administrativo:", reply_markup=keyboard)
+    else:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 Abrir denúncia", callback_data="menu_abrir")]
+        ])
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"👋 Olá! Bem-vindo ao sistema de denúncias.\n{membro_status}\nEscolha uma opção abaixo:",
+            reply_markup=keyboard
+        )
 
     is_member = await verificar_membro(context.bot, GROUP_ID, user_id)
     membro_status = "Membro ✅" if is_member else "Membro ❌"
