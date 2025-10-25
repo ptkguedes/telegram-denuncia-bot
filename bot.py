@@ -116,7 +116,6 @@ async def iniciar_temporizador_envio(user_id, context):
             )
 
     temporizadores_envio[user_id] = asyncio.create_task(aguardar_e_sugerir_envio())
-
 async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user = update.effective_user
@@ -214,6 +213,8 @@ async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    username = update.effective_user.username or "Não disponível"
+
     if user_id not in denuncias_em_andamento:
         await context.bot.send_message(chat_id=user_id, text="⚠️ Você não possui nenhuma denúncia em andamento.")
         return
@@ -225,11 +226,14 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     denuncias.append(dados)
     salvar_denuncias()
 
-    # 🔔 Enviar denúncia aos administradores
+    is_member = await verificar_membro(context.bot, GROUP_ID, user_id)
+    membro_status = "Membro ✅" if is_member else "Membro ❌"
+
     for admin_id in ADMINS:
         cabecalho = (
             f"📥 Nova denúncia recebida:\n"
-            f"👤 Usuário: {user_id}\n"
+            f"👤 Usuário: {user_id} (@{username})\n"
+            f"{membro_status}\n"
             f"📂 Categoria: {dados['categoria']}\n"
             f"🕒 Horário: {dados['timestamp']}\n"
             f"📎 Total de mensagens: {len(dados['mensagens'])}"
@@ -247,10 +251,14 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 elif tipo == "video":
                     await context.bot.send_video(chat_id=admin_id, video=file_id)
 
-    # ✅ Confirmação ao usuário
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📩 Notificar denunciante", callback_data=f"notificar_{user_id}")],
+            [InlineKeyboardButton("💬 Interagir com denunciante", callback_data=f"interagir_{user_id}")]
+        ])
+        await context.bot.send_message(chat_id=admin_id, text="Ações disponíveis:", reply_markup=keyboard)
+
     await context.bot.send_message(chat_id=user_id, text="✅ Denúncia enviada com sucesso. Obrigado por colaborar!")
     context.bot_data[f"denuncia_enviada_{user_id}"] = True
-
 
 async def tratar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -309,6 +317,22 @@ async def tratar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.message.reply_text("✅ Nenhum usuário bloqueado.")
 
+        elif query.data.startswith("notificar_"):
+        alvo_id = int(query.data.split("_")[1])
+        await context.bot.send_message(
+            chat_id=alvo_id,
+            text="📢 Sua denúncia foi recebida com sucesso. Entraremos em contato caso precisemos de mais detalhes."
+        )
+        await query.message.reply_text("✅ Denunciante notificado com sucesso.")
+
+    elif query.data.startswith("interagir_"):
+        alvo_id = int(query.data.split("_")[1])
+        await context.bot.send_message(
+            chat_id=alvo_id,
+            text="📢 Sua denúncia foi recebida. Se precisarmos de mais detalhes, entraremos em contato por aqui."
+        )
+        await query.message.reply_text("✅ Mensagem enviada ao denunciante.")
+
 # ✅ Inicialização do bot
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
@@ -319,3 +343,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
