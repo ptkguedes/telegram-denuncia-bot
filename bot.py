@@ -317,7 +317,7 @@ async def tratar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.message.reply_text("✅ Nenhum usuário bloqueado.")
 
-        elif query.data.startswith("notificar_"):
+    elif query.data.startswith("notificar_"):
         alvo_id = int(query.data.split("_")[1])
         await context.bot.send_message(
             chat_id=alvo_id,
@@ -331,7 +331,8 @@ async def tratar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=alvo_id,
             text="📢 Sua denúncia foi recebida. Se precisarmos de mais detalhes, entraremos em contato por aqui."
         )
-        await query.message.reply_text("✅ Mensagem enviada ao denunciante.")
+        await query.message.reply_text("✅ Mensagem enviada ao denunciante.")= 
+        
 
 # ✅ Inicialização do bot
 def main():
