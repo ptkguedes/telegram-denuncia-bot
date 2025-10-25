@@ -225,8 +225,32 @@ async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     denuncias.append(dados)
     salvar_denuncias()
 
+    # 🔔 Enviar denúncia aos administradores
+    for admin_id in ADMINS:
+        cabecalho = (
+            f"📥 Nova denúncia recebida:\n"
+            f"👤 Usuário: {user_id}\n"
+            f"📂 Categoria: {dados['categoria']}\n"
+            f"🕒 Horário: {dados['timestamp']}\n"
+            f"📎 Total de mensagens: {len(dados['mensagens'])}"
+        )
+        await context.bot.send_message(chat_id=admin_id, text=cabecalho)
+
+        for item in dados["mensagens"]:
+            if isinstance(item, str):
+                await context.bot.send_message(chat_id=admin_id, text=f"📝 {item}")
+            elif isinstance(item, dict):
+                tipo = item.get("tipo")
+                file_id = item.get("file_id")
+                if tipo == "photo":
+                    await context.bot.send_photo(chat_id=admin_id, photo=file_id)
+                elif tipo == "video":
+                    await context.bot.send_video(chat_id=admin_id, video=file_id)
+
+    # ✅ Confirmação ao usuário
     await context.bot.send_message(chat_id=user_id, text="✅ Denúncia enviada com sucesso. Obrigado por colaborar!")
     context.bot_data[f"denuncia_enviada_{user_id}"] = True
+
 
 async def tratar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
