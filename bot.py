@@ -18,6 +18,7 @@ ADMINS = [7477496964, 6439529867]
 DENUNCIAS_ARQUIVO = "denuncias.json"
 BLOQUEADOS_ARQUIVO = "bloqueados.json"
 
+# ⬇️ Variáveis globais
 denuncias = []
 bloqueados = []
 denuncias_em_andamento = {}
@@ -87,10 +88,8 @@ async def iniciar_temporizador_envio(user_id, context):
             )
 
     temporizadores_envio[user_id] = asyncio.create_task(aguardar_e_sugerir_envio())
-      temporizadores_inatividade = {}
 
 async def monitorar_inatividade(user_id, context):
-    # Cancela monitoramento anterior, se existir
     if user_id in temporizadores_inatividade:
         temporizadores_inatividade[user_id].cancel()
 
@@ -100,7 +99,6 @@ async def monitorar_inatividade(user_id, context):
         if not ultimo or user_id not in denuncias_em_andamento:
             return
 
-        # Envia aviso de inatividade
         await context.bot.send_message(
             chat_id=user_id,
             text="👀 Ei, ainda está aí? Se não continuar sua denúncia, ela será encerrada por inatividade."
@@ -138,6 +136,7 @@ async def monitorar_inatividade(user_id, context):
                 )
 
     temporizadores_inatividade[user_id] = asyncio.create_task(tarefa())
+
 
 async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
