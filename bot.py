@@ -13,7 +13,7 @@ load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))
 
-ADMINS = [7477496964, 6439529867]
+ADMINS = [8154662660 , 6439529867]
 
 DENUNCIAS_ARQUIVO = "denuncias.json"
 BLOQUEADOS_ARQUIVO = "bloqueados.json"
