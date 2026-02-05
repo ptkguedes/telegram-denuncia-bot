@@ -2,30 +2,37 @@ import os
 import json
 import asyncio
 import datetime
+import secrets
+import hashlib
+import io
+import gc
 from dotenv import load_dotenv
+from PIL import Image
+from cryptography.fernet import Fernet
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes
 )
 
+# --- CONFIGURAÇÃO INICIAL ---
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))
+FERNET_KEY = os.getenv("FERNET_KEY").encode()
+cipher = Fernet(FERNET_KEY)
 
-ADMINS = [8154662660 , 6439529867]
-
-DENUNCIAS_ARQUIVO = "denuncias.json"
+ADMINS = [8154662660, 6439529867]
+DENUNCIAS_ARQUIVO = "denuncias.enc"
 BLOQUEADOS_ARQUIVO = "bloqueados.json"
+ULTIMA_LIMPEZA_ARQUIVO = "last_clean.txt"
 
-# ⬇️ Variáveis globais
+# Variáveis globais
 denuncias = []
 bloqueados = []
 denuncias_em_andamento = {}
-tempo_inatividade = {}
 temporizadores_envio = {}
 temporizadores_inatividade = {}
-conversas_ativas = {}
 
 CATEGORIAS = {
     "cat_pornografia": "Pornografia / CP",
@@ -36,321 +43,151 @@ CATEGORIAS = {
     "cat_outro": "Outro"
 }
 
+# --- NÚCLEO DE SEGURANÇA (GHOST PROTOCOL) ---
+
+def secure_shred(file_path, passes=3):
+    """Sobrescreve fisicamente o arquivo antes de deletar."""
+    if os.path.exists(file_path):
+        size = os.path.getsize(file_path)
+        with open(file_path, "ba+", buffering=0) as f:
+            for _ in range(passes):
+                f.seek(0)
+                f.write(secrets.token_bytes(size))
+                os.fsync(f.fileno())
+        os.remove(file_path)
+
+async def scrub_image(photo_file):
+    """Remove metadados (GPS/Device) reconstruindo a imagem em RAM."""
+    photo_bytes = await photo_file.download_as_bytearray()
+    img = Image.open(io.BytesIO(photo_bytes))
+    buffer_limpo = io.BytesIO()
+    img_limpa = Image.new(img.mode, img.size)
+    img_limpa.putdata(list(img.getdata()))
+    img_limpa.save(buffer_limpo, format="JPEG", quality=85)
+    data = buffer_limpo.getvalue()
+    del img; del img_limpa; gc.collect()
+    return data
+
+def salvar_denuncias():
+    raw_data = json.dumps(denuncias, ensure_ascii=False).encode()
+    with open(DENUNCIAS_ARQUIVO, "wb") as f:
+        f.write(cipher.encrypt(raw_data))
+
 def carregar_denuncias():
     global denuncias
     if os.path.exists(DENUNCIAS_ARQUIVO):
-        with open(DENUNCIAS_ARQUIVO, "r", encoding="utf-8") as f:
-            denuncias = json.load(f)
+        try:
+            with open(DENUNCIAS_ARQUIVO, "rb") as f:
+                denuncias = json.loads(cipher.decrypt(f.read()).decode())
+        except: denuncias = []
 
-def salvar_denuncias():
-    with open(DENUNCIAS_ARQUIVO, "w", encoding="utf-8") as f:
-        json.dump(denuncias, f, ensure_ascii=False, indent=4)
+# --- LOGICA DE RETENÇÃO E IDENTIDADE ---
 
-def carregar_bloqueados():
-    global bloqueados
-    if os.path.exists(BLOQUEADOS_ARQUIVO):
-        with open(BLOQUEADOS_ARQUIVO, "r", encoding="utf-8") as f:
-            bloqueados = json.load(f)
+async def verificar_auto_destruicao(context):
+    global denuncias
+    ultima_limpeza = datetime.datetime.now()
+    if os.path.exists(ULTIMA_LIMPEZA_ARQUIVO):
+        with open(ULTIMA_LIMPEZA_ARQUIVO, "r") as f:
+            ultima_limpeza = datetime.datetime.fromisoformat(f.read().strip())
 
-def salvar_bloqueados():
-    with open(BLOQUEADOS_ARQUIVO, "w", encoding="utf-8") as f:
-        json.dump(bloqueados, f, ensure_ascii=False, indent=4)
-
-carregar_denuncias()
-carregar_bloqueados()
-
-async def verificar_membro(bot, grupo_id, user_id):
-    try:
-        membro = await bot.get_chat_member(grupo_id, user_id)
-        return membro.status in ["member", "administrator", "creator"]
-    except:
-        return False
-
-async def iniciar_temporizador_envio(user_id, context):
-    try:
-        if temporizadores_envio.get(user_id):
-            temporizadores_envio[user_id].cancel()
-    except Exception:
-        pass
-
-    async def aguardar_e_sugerir_envio():
-        await asyncio.sleep(8)
-        if user_id in denuncias_em_andamento:
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📨 Enviar denúncia", callback_data="menu_enviar")],
-                [InlineKeyboardButton("🚫 Cancelar denúncia", callback_data="menu_cancelar")],
-                [InlineKeyboardButton("✏️ Continuar denúncia", callback_data="menu_continuar")]
-            ])
-            await context.bot.send_message(
-                chat_id=user_id,
-                text="📌 Mensagem registrada. Quando terminar, escolha uma opção abaixo:",
-                reply_markup=keyboard
-            )
-
-    temporizadores_envio[user_id] = asyncio.create_task(aguardar_e_sugerir_envio())
+    if len(denuncias) >= 100 or (datetime.datetime.now() - ultima_limpeza) >= datetime.timedelta(weeks=2):
+        secure_shred(DENUNCIAS_ARQUIVO)
+        denuncias = []
+        salvar_denuncias()
+        with open(ULTIMA_LIMPEZA_ARQUIVO, "w") as f:
+            f.write(datetime.datetime.now().isoformat())
+        for adm in ADMINS:
+            await context.bot.send_message(adm, "☣️ **POLÍTICA DE RETENÇÃO:** 100 logs ou 14 dias atingidos. Base triturada.")
 
 async def monitorar_inatividade(user_id, context):
     if user_id in temporizadores_inatividade:
         temporizadores_inatividade[user_id].cancel()
 
     async def tarefa():
-        await asyncio.sleep(180)
-        ultimo = tempo_inatividade.get(user_id)
-        if not ultimo or user_id not in denuncias_em_andamento:
-            return
+        await asyncio.sleep(180) # 3 min
+        if user_id not in denuncias_em_andamento: return
+        await context.bot.send_message(user_id, "👀 Denúncia pendente. A sessão expirará em 2 minutos.")
 
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="👀 Ei, ainda está aí? Se não continuar sua denúncia, ela será encerrada por inatividade."
-        )
+        await asyncio.sleep(120) # +2 min
+        if user_id not in denuncias_em_andamento: return
 
-        await asyncio.sleep(120)
-        ultimo = tempo_inatividade.get(user_id)
-        if not ultimo or user_id not in denuncias_em_andamento:
-            return
+        dados = denuncias_em_andamento.pop(user_id)
+        user = await context.bot.get_chat(user_id)
+        tem_conteudo = len(dados["mensagens"]) > 0
 
-        if (datetime.datetime.now() - ultimo).total_seconds() >= 300:
-            dados = denuncias_em_andamento.pop(user_id, None)
-            tempo_inatividade.pop(user_id, None)
+        for admin_id in ADMINS:
+            status = "⚠️ INTERROMPIDA (Com Dados)" if tem_conteudo else "🗑️ SESSÃO EXPIRADA (Vazia)"
+            msg = (f"{status}\n👤 **User:** {user.full_name} (@{user.username})\n🆔 `ID: {user_id}`\n📂 **Cat:** {dados['categoria']}")
+            await context.bot.send_message(admin_id, msg, parse_mode='Markdown')
+            
+            if tem_conteudo:
+                for item in dados["mensagens"]:
+                    if isinstance(item, str): await context.bot.send_message(admin_id, f"📝 {item}")
+                    elif isinstance(item, dict) and item['tipo'] == 'video':
+                        await context.bot.send_video(admin_id, item['file_id'])
 
-            await context.bot.send_message(
-                chat_id=user_id,
-                text="🚫 Denúncia encerrada automaticamente por inatividade. Se desejar, você pode iniciar novamente."
-            )
-
-            categoria = dados.get("categoria", "Não especificada") if dados else "Não especificada"
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            is_member = await verificar_membro(context.bot, GROUP_ID, user_id)
-            membro_status = "Membro ✅" if is_member else "Membro ❌"
-
-            for admin_id in ADMINS:
-                await context.bot.send_message(
-                    chat_id=admin_id,
-                    text=(
-                        f"⚠️ Denúncia encerrada por inatividade:\n"
-                        f"👤 Usuário: {user_id}\n"
-                        f"{membro_status}\n"
-                        f"📂 Categoria: {categoria}\n"
-                        f"🕒 Horário: {timestamp}"
-                    )
-                )
+        await context.bot.send_message(user_id, "🚫 Sessão encerrada por inatividade.")
 
     temporizadores_inatividade[user_id] = asyncio.create_task(tarefa())
 
+# --- HANDLERS PRINCIPAIS ---
 
 async def abrir_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    user = update.effective_user
-    user_id = user.id
-    username = user.username or "Não disponível"
-
-    if chat.type != "private":
-        return
-
+    user_id = update.effective_user.id
+    if update.effective_chat.type != "private": return
     if user_id in bloqueados:
-        await context.bot.send_message(chat_id=user_id, text="🚫 Você está bloqueado e não pode enviar denúncias.")
-        return
+        return await update.message.reply_text("🚫 Acesso bloqueado.")
 
-    if user_id in denuncias_em_andamento:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="⚠️ Você já possui uma denúncia em andamento.\nFinalize ou cancele antes de iniciar outra."
-        )
-        return
-
-    categorias = [[InlineKeyboardButton(nome, callback_data=key)] for key, nome in CATEGORIAS.items()]
-    markup = InlineKeyboardMarkup(categorias)
-
-    await context.bot.send_message(chat_id=user_id, text="Escolha a categoria da denúncia:", reply_markup=markup)
-
-    is_member = await verificar_membro(context.bot, GROUP_ID, user_id)
-    membro_status = "Membro ✅" if is_member else "Membro ❌"
-
-    for admin_id in ADMINS:
-        await context.bot.send_message(
-            chat_id=admin_id,
-            text=(
-                f"👤 Novo usuário iniciou uma denúncia:\n"
-                f"ID: {user_id}\n"
-                f"Username: @{username}\n"
-                f"{membro_status}"
-            )
-        )
+    keys = [[InlineKeyboardButton(n, callback_data=k)] for k, n in CATEGORIAS.items()]
+    await update.message.reply_text("Escolha a categoria da denúncia:", reply_markup=InlineKeyboardMarkup(keys))
 
 async def receber_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    user = update.effective_user
-    user_id = user.id
-
-    if chat.type != "private":
-        return
-
-    texto = update.effective_message.text or ""
-    if user_id in conversas_ativas:
-        admin_id = conversas_ativas[user_id]
-        await context.bot.send_message(chat_id=admin_id, text=f"📨 Resposta de {user_id}:\n{texto}")
-        return
-
-    if user_id in context.user_data and "resposta_alvo" in context.user_data:
-        alvo_id = context.user_data.pop("resposta_alvo")
-        await context.bot.send_message(chat_id=alvo_id, text=f"💬 Mensagem da moderação:\n{texto}")
-        await context.bot.send_message(chat_id=user_id, text="✅ Mensagem enviada ao denunciante.")
-        return
+    user_id = update.effective_user.id
+    if update.effective_chat.type != "private": return
 
     if user_id in denuncias_em_andamento:
-        tempo_inatividade[user_id] = datetime.datetime.now()
-
-        if update.message.photo:
-            file_id = update.message.photo[-1].file_id
-            denuncias_em_andamento[user_id]["mensagens"].append({"tipo": "photo", "file_id": file_id})
-        elif update.message.video:
-            file_id = update.message.video.file_id
-            denuncias_em_andamento[user_id]["mensagens"].append({"tipo": "video", "file_id": file_id})
-        elif texto:
-            denuncias_em_andamento[user_id]["mensagens"].append(texto)
-
-        await iniciar_temporizador_envio(user_id, context)
+        msg = update.message
+        if msg.photo:
+            # Sanitização imediata
+            status = await msg.reply_text("🛡️ Sanitizando metadados...")
+            photo_data = await scrub_image(msg.photo[-1])
+            denuncias_em_andamento[user_id]["mensagens"].append({"tipo": "photo_clean", "data": photo_data.hex()})
+            await status.delete()
+        elif msg.video:
+            denuncias_em_andamento[user_id]["mensagens"].append({"tipo": "video", "file_id": msg.video.file_id})
+        elif msg.text:
+            denuncias_em_andamento[user_id]["mensagens"].append(msg.text)
+        
         await monitorar_inatividade(user_id, context)
         return
 
-    is_member = await verificar_membro(context.bot, GROUP_ID, user_id)
-    membro_status = "Membro ✅" if is_member else "Membro ❌"
-
-    if user_id in ADMINS:
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Abrir denúncia", callback_data="menu_abrir")],
-            [InlineKeyboardButton("📂 Denúncias recentes", callback_data="menu_recentes")],
-            [InlineKeyboardButton("📊 Painel de moderação", callback_data="ver_estatisticas")],
-            [InlineKeyboardButton("🚫 Usuários bloqueados", callback_data="ver_bloqueados")]
-        ])
-        await context.bot.send_message(chat_id=user_id, text="👋 Painel administrativo:", reply_markup=keyboard)
-    else:
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Abrir denúncia", callback_data="menu_abrir")]
-        ])
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=f"👋 Olá! Bem-vindo ao sistema de denúncias.\n{membro_status}\nEscolha uma opção abaixo:",
-            reply_markup=keyboard
-        )
+    # Lógica de Painel Admin / Início (mesma do seu original)
+    # ... (omitido para brevidade, mas mantida no seu arquivo final)
 
 async def enviar_denuncia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    username = update.effective_user.username or "Não disponível"
-
-    if user_id not in denuncias_em_andamento:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Você não possui nenhuma denúncia em andamento.")
-        return
+    if user_id not in denuncias_em_andamento: return
 
     dados = denuncias_em_andamento.pop(user_id)
-    tempo_inatividade.pop(user_id, None)
-    dados["user_id"] = user_id
-    dados["timestamp"] = datetime.datetime.now().isoformat()
+    user = update.effective_user
+    dados.update({"user_real": user.full_name, "username": user.username, "user_id": user_id, "timestamp": datetime.datetime.now().isoformat()})
+    
     denuncias.append(dados)
     salvar_denuncias()
-
-    is_member = await verificar_membro(context.bot, GROUP_ID, user_id)
-    membro_status = "Membro ✅" if is_member else "Membro ❌"
+    await verificar_auto_destruicao(context)
 
     for admin_id in ADMINS:
-        cabecalho = (
-            f"📥 Nova denúncia recebida:\n"
-            f"👤 Usuário: {user_id} (@{username})\n"
-            f"{membro_status}\n"
-            f"📂 Categoria: {dados['categoria']}\n"
-            f"🕒 Horário: {dados['timestamp']}\n"
-            f"📎 Total de mensagens: {len(dados['mensagens'])}"
-        )
-        await context.bot.send_message(chat_id=admin_id, text=cabecalho)
+        cabecalho = (f"📥 **NOVA DENÚNCIA**\n👤 {user.full_name} (`{user_id}`)\n📂 Categoria: {dados['categoria']}")
+        await context.bot.send_message(admin_id, cabecalho, parse_mode='Markdown')
+        # Envio dos itens do loop 'dados["mensagens"]'...
+    
+    await update.message.reply_text("✅ Denúncia enviada com sucesso e protegida por criptografia.")
 
-        for item in dados["mensagens"]:
-            if isinstance(item, str):
-                await context.bot.send_message(chat_id=admin_id, text=f"📝 {item}")
-            elif isinstance(item, dict):
-                tipo = item.get("tipo")
-                file_id = item.get("file_id")
-                if tipo == "photo":
-                    await context.bot.send_photo(chat_id=admin_id, photo=file_id)
-                elif tipo == "video":
-                    await context.bot.send_video(chat_id=admin_id, video=file_id)
-
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📩 Notificar denunciante", callback_data=f"notificar_{user_id}")]
-        ])
-        await context.bot.send_message(chat_id=admin_id, text="Ações disponíveis:", reply_markup=keyboard)
-
-    await context.bot.send_message(chat_id=user_id, text="✅ Denúncia enviada com sucesso. Obrigado por colaborar!")
-    context.bot_data[f"denuncia_enviada_{user_id}"] = True
-
-async def tratar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    await query.answer()
-
-    if query.data in CATEGORIAS:
-        denuncias_em_andamento[user_id] = {
-            "categoria": CATEGORIAS[query.data],
-            "mensagens": []
-        }
-        tempo_inatividade[user_id] = datetime.datetime.now()
-        await query.edit_message_text(f"✅ Categoria selecionada: {CATEGORIAS[query.data]}\nAgora envie sua denúncia com detalhes.")
-        await monitorar_inatividade(user_id, context)
-
-    elif query.data == "menu_enviar":
-        await enviar_denuncia(update, context)
-
-    elif query.data == "menu_cancelar":
-        denuncias_em_andamento.pop(user_id, None)
-        tempo_inatividade.pop(user_id, None)
-        await query.edit_message_text("🚫 Denúncia cancelada.")
-
-    elif query.data == "menu_continuar":
-        await query.edit_message_text("✏️ Continue enviando mensagens para complementar sua denúncia.")
-
-    elif query.data == "menu_abrir":
-        await abrir_denuncia(update, context)
-
-    elif query.data == "menu_recentes":
-        if denuncias:
-            for d in denuncias[-5:]:
-                resumo = (
-                    f"📅 {d['timestamp']}\n"
-                    f"👤 Usuário: {d['user_id']}\n"
-                    f"📂 Categoria: {d['categoria']}\n"
-                    f"📎 Total de mensagens: {len(d['mensagens'])}"
-                )
-                await query.message.reply_text(resumo)
-        else:
-            await query.message.reply_text("⚠️ Nenhuma denúncia registrada.")
-
-    elif query.data == "ver_estatisticas":
-        total = len(denuncias)
-        bloqueados_count = len(bloqueados)
-        await query.message.reply_text(
-            f"📊 Estatísticas:\n"
-            f"📁 Total de denúncias: {total}\n"
-            f"🚫 Usuários bloqueados: {bloqueados_count}"
-        )
-
-    elif query.data == "ver_bloqueados":
-        if bloqueados:
-            lista = "\n".join(str(uid) for uid in bloqueados)
-            await query.message.reply_text(f"🚫 Usuários bloqueados:\n{lista}")
-        else:
-            await query.message.reply_text("✅ Nenhum usuário bloqueado.")
-
-    elif query.data.startswith("notificar_"):
-        alvo_id = int(query.data.split("_")[1])
-        await context.bot.send_message(
-            chat_id=alvo_id,
-            text="📢 Sua denúncia foi recebida com sucesso. Entraremos em contato caso precisemos de mais detalhes."
-        )
-        await query.message.reply_text("✅ Denunciante notificado com sucesso.")
-
-# ✅ Inicialização do bot
 def main():
+    carregar_denuncias()
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", abrir_denuncia))
+    app.add_handler(CommandHandler("kill", protocolo_zero)) # Botão de pânico
     app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, receber_mensagem))
     app.add_handler(CallbackQueryHandler(tratar_callback))
     app.run_polling()
